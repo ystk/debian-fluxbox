@@ -1,0 +1,3 @@
+session.menuFile:	~/.@pkgprefix@fluxbox@pkgsuffix@/menu
+session.keyFile: ~/.@pkgprefix@fluxbox@pkgsuffix@/keys
+session.configVersion:	10
