@@ -1,0 +1,30 @@
+Source: fluxbox
+Section: x11
+Priority: optional
+Maintainer: Dmitry E. Oboukhov <unera@debian.org>
+Uploaders: Martin F. Krafft <madduck@debian.org>,
+ Paul Tagliamonte <paultag@ubuntu.com>,
+ Denis Briand <denis@narcan.fr>
+DM-Upload-Allowed: yes
+Build-Depends: cdbs (>= 0.4.23-1.1), bzip2, autotools-dev, debhelper (>= 5),
+ libx11-dev, libxft-dev, libxinerama-dev, libxpm-dev,
+ libxrandr-dev, libxt-dev, libxext-dev,
+ libimlib2-dev, libgtk2.0-dev, imagemagick, libmagickcore3-extra
+Standards-Version: 3.8.4
+Homepage: http://fluxbox.org
+VCS-git: git://git.debian.org/git/collab-maint/fluxbox.git
+VCS-browser: http://git.debian.org/?p=collab-maint/fluxbox.git;a=summary
+
+Package: fluxbox
+Architecture: any
+Provides: x-window-manager
+Recommends: xfonts-terminus
+Suggests: fluxconf, fbpager, fbdesk
+Depends: menu (>=2.1.19), ${shlibs:Depends}, ${misc:Depends}
+Description: Highly configurable and low resource X11 Window manager
+ Fairly similar to blackbox, from which it is derived, but has been
+ extended with features such as pwm-style window tabs, configurable
+ key bindings, toolbar, and an iconbar. It also includes some cosmetic
+ fixes over blackbox.
+ .
+ This package contains support for GNOME and KDE.

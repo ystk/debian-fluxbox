@@ -1,0 +1,1 @@
+fluxbox: command-with-path-in-maintainer-script preinst:7 /usr/bin/bsetroot

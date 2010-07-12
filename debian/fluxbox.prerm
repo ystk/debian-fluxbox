@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+  remove)
+
+    if test -x /usr/sbin/update-alternatives; then
+      update-alternatives --remove x-window-manager /usr/bin/startfluxbox
+    fi
+    ;;
+
+  *)
+  ;;
+esac
+
+#DEBHELPER#

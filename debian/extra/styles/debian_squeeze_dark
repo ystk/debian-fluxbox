@@ -1,0 +1,197 @@
+###############################################################################
+# Copyright (c) 2010, Denis Briand <denis@narcan.fr>
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification,are permitted provided that the following conditions are met:
+#
+#    * Redistributions of source code must retain the above copyright notice,
+#      this list of conditions and the following disclaimer.
+#    * Redistributions in binary form must reproduce the above copyright notice,
+#      this list of conditions and the following disclaimer in the documentation
+#       and/or other materials provided with the distribution.
+#    * Neither the name of Denis Briand nor the names of its contributors
+#      may be used to endorse or promote products derived from this software
+#      without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+###############################################################################
+
+style.name:				Debian Squeeze dark
+style.author:				Denis Briand <denis@narcan.fr>
+
+
+# background ------------------------------------
+
+background:				fullscreen
+background.pixmap:			/usr/share/fluxbox/wallpaper-flux-debian-lighting-black-1600x1200.svg
+
+
+# fonts------------------------------------------
+menu.frame.font:			sans-9:bold
+menu.title.font:			sans-10:bold
+toolbar.clock.font:			sans-9:bold
+toolbar.workspace.font:			tahoma-10:bold
+toolbar.iconbar.focused.font:		sans-8:bold
+toolbar.iconbar.unfocused.font:		sans-8
+window.font:				sans-8
+
+
+
+#menu --------------------------
+
+menu.roundCorners: 			topleft topright bottomleft bottomright
+
+menu.bevelWidth:			1
+
+menu.itemHeight:			15
+menu.titleHeight:			15
+menu.borderColor:			#224550
+menu.borderWidth:			1
+
+menu.bullet:				triangle
+menu.bullet.position:			Right
+
+menu.title:				flat gradient rectangle
+menu.title.justify:			center
+menu.title.color:			#000000
+menu.title.colorTo:			#b10643
+menu.title.textColor:			#bfbfbf
+
+menu.frame:				flat gradient
+menu.frame.justify:			left
+menu.frame.color:			#191616
+menu.frame.colorTo:			#000000
+menu.frame.textColor:			#bfbfbf
+menu.frame.disableColor:		#cfa7a7
+
+menu.hilite:				flat gradient
+menu.hilite.color:			#830934
+menu.hilite.colorTo:			#000000
+menu.hilite.textColor:			#bfbfbf			
+
+
+
+# toolbar -----------------------
+
+toolbar.bevelWidth:			1
+
+toolbar.borderWidth:			1
+toolbar.borderColor:			#224550
+
+toolbar.height:				20
+
+toolbar.justify:			center
+
+toolbar:				flat
+
+toolbar.pixmap:					
+
+toolbar.color:				#191616
+toolbar.colorTo:			#000000
+
+toolbar.clock:				flat gradient rectangle
+toolbar.clock.justify:			center
+toolbar.clock.color:			#000000
+toolbar.clock.colorTo:			#b10643
+toolbar.clock.textColor:		#bfbfbf
+
+toolbar.workspace:			flat
+toolbar.workspace.justify:		Center
+toolbar.workspace.color:		#000000
+toolbar.workspace.colorTo:		#b10643
+toolbar.workspace.textColor:		#bfbfbf
+
+toolbar.button:				flat 
+toolbar.button.color:			#000000
+toolbar.button.colorTo:			#000000
+toolbar.button.picColor:		#830934
+toolbar.button.pressed:			flat 
+toolbar.button.pressed.color:		#bfbfbf
+toolbar.button.pressed.colorTo:		#bfbfbf
+toolbar.button.pressed.picColor:	#830934
+
+toolbar.iconbar.empty:			flat
+toolbar.iconbar.empty.color:		#000000
+toolbar.iconbar.empty.colorTo:		#000000
+
+toolbar.iconbar.focused:		flat gradient
+toolbar.iconbar.focused.color:		#830934
+toolbar.iconbar.focused.colorTo:	#000000
+toolbar.iconbar.focused.textColor:	#ffffff
+toolbar.iconbar.focused.justify:	center
+
+toolbar.iconbar.unfocused:		flat
+toolbar.iconbar.unfocused.color:	#000000
+toolbar.iconbar.unfocused.colorTo:	#000000
+toolbar.iconbar.unfocused.textColor:	#6f6f6f
+toolbar.iconbar.unfocused.justify:	center
+
+
+
+# window ------------------------------
+
+window.roundCorners: 			bottomleft bottomright
+
+window.bevelWidth:			1
+window.shade:				true
+window.borderWidth:			1
+window.borderColor:			#224550
+
+window.justify:				Center
+
+window.title.height:			20
+
+window.title.focus:			flat gradient rectangle
+window.title.focus.color:		#000000
+window.title.focus.colorTo:		#b10643
+window.title.unfocus:			flat
+window.title.unfocus.color:		#212121
+window.title.unfocus.colorTo:		#212121
+
+window.label.focus:			flat gradient rectangle
+window.label.focus.color:		#000000
+window.label.focus.colorTo:		#b10643
+window.label.focus.textColor:		#bfbfbf
+window.label.unfocus:			flat gradient
+window.label.unfocus.color:		#191616
+window.label.unfocus.colorTo:		#000000
+window.label.unfocus.textColor:		#bfbfbf
+
+window.button.focus:			flat
+window.button.focus.color:      	#4C4C4C
+window.button.focus.colorTo:      	#4C4C4C
+window.button.focus.picColor:		#C5C5C5
+window.button.unfocus:			flat
+window.button.unfocus.Color:		#4C4C4C
+window.button.unfocus.ColorTo:		#4C4C4C
+window.button.unfocus.picColor:		#797979
+window.button.pressed:			flat
+window.button.pressed.color:		#4C4C4C
+window.button.pressed.colorTo:		#4C4C4C
+window.button.pressed.picColor:		#C5C5C5
+
+window.handle.focus:			flat
+window.handle.focus.color:		#212121
+window.handle.focus.colorTo:		#212121
+window.handle.unfocus:			flat
+window.handle.unfocus.color:		#212121
+window.handle.unfocus.colorTo:		#212121
+window.handleWidth:			3
+
+window.grip.focus:			flat
+window.grip.focus.color:		#3F5F42
+window.grip.focus.colorTo:		#3F5F42
+window.grip.unfocus:			flat
+window.grip.unfocus.color:		#212121
+window.grip.unfocus.colorTo:		#212121

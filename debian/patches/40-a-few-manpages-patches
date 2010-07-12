@@ -1,0 +1,162 @@
+Description: Upstream changes introduced in version 1.1.1+dfsg2-1
+ This patch has been created by dpkg-source during the package build.
+ Here's the last changelog entry, hopefully it gives details on why
+ those changes were made:
+ .
+ fluxbox (1.1.1+dfsg2-1) UNRELEASED; urgency=low
+ .
+   [Denis Briand]
+   * Create extra directory to put all debian's styles and backgrounds.
+   * New default background, thanks to Thomas Guillot <gtom@gtom.eu>.
+   * Update copyright file with the CC-by-SA 3 license for
+     the background picture.
+   * Update copyright file with the 3-clause BSD license for
+     debian_squeeze_dark style file.
+ .
+   [Paul Tagliamonte]
+   * Added patch for fbsetbg scale behavior. (Closes: #583704).
+     Thanks to Jeremiah Mahler for his patch!
+   * The following themes have been merged from upstream under
+     a new license: arch, bloe, bora_black, bora_blue, bora_green
+     carp, green_tea, ostrich, zimek_bisque, zimek_darkblue,
+     zimek_green. They were moved from CC-BY-SA 2.5 to CC-BY-SA 3.0
+ .
+ The person named in the Author field signed this changelog entry.
+Author: Paul Tagliamonte <paultag@ubuntu.com>
+Bug-Debian: http://bugs.debian.org/583704
+
+---
+The information above should follow the Patch Tagging Guidelines, please
+checkout http://dep.debian.net/deps/dep3/ to learn about the format. Here
+are templates for supplementary fields that you might want to add:
+
+Origin: <vendor|upstream|other>, <url of original patch>
+Bug: <url in upstream bugtracker>
+Bug-Debian: http://bugs.debian.org/<bugnumber>
+Forwarded: <no|not-needed|url proving that it has been forwarded>
+Reviewed-By: <name and email of someone who approved the patch>
+Last-Update: <YYYY-MM-DD>
+
+--- fluxbox-1.1.1+dfsg2.orig/doc/fbrun.1
++++ fluxbox-1.1.1+dfsg2/doc/fbrun.1
+@@ -22,46 +22,46 @@ to your menu that contains all the optio
+ said entry, you could edit the line as necessary and execute it.
+ .SH OPTIONS
+ .TP
+-\fB-font\fP \fIname\fP
++\fB\-font\fP \fIname\fP
+ Text font name
+ .TP
+-\fB-title\fP \fIname\fP
++\fB\-title\fP \fIname\fP
+ Set title
+ .TP
+-\fB-text\fP \fItext\fP
++\fB\-text\fP \fItext\fP
+ Text input
+ .TP
+-\fB-w\fP \fIwidth\fP
++\fB\-w\fP \fIwidth\fP
+ Window width in pixels
+ .TP
+-\fB-h\fP \fIheight\fP
++\fB\-h\fP \fIheight\fP
+ Window height in pixels
+ .TP
+-\fB-display\fP \fIname\fP
++\fB\-display\fP \fIname\fP
+ Display name
+ .TP
+-\fB-pos\fP \fIx\fP \fIy\fP
++\fB\-pos\fP \fIx\fP \fIy\fP
+ Window position in pixels
+ .TP
+-\fB-nearmouse\fP
++\fB\-nearmouse\fP
+ Position the window under the mouse cursor
+ .TP
+-\fB-fg\fP \fIname\fP
++\fB\-fg\fP \fIname\fP
+ Foreground text color
+ .TP
+-\fB-bg\fP \fIname\fP
++\fB\-bg\fP \fIname\fP
+ Background color
+ .TP
+-\fB-na\fP
++\fB\-na\fP
+ Disable antialias
+ .TP
+-\fB-hf\fP \fIfilename\fP
++\fB\-hf\fP \fIfilename\fP
+ History file to load (default ~/.fluxbox/fbrun_history
+ .TP
+-\fB-help\fP
++\fB\-help\fP
+ Show this help
+ .SH EXAMPLE
+-  \fBfbrun -fg black -bg white -text xterm -title "run xterm"\fP
++  \fBfbrun \-fg black \-bg white \-text xterm \-title "run xterm"\fP
+ .SH AUTHOR
+ This manpage was originally written by Bastian Kleineidam
+ <calvin@debian.org> for the Debian distribution of fluxbox
+--- fluxbox-1.1.1+dfsg2.orig/doc/fbsetroot.1
++++ fluxbox-1.1.1+dfsg2/doc/fbsetroot.1
+@@ -68,7 +68,7 @@ may be one of:
+ .PP
+ Select one of these texture types, they only apply when
+ .B \-gradient
+-is specifed. You must also specify both a
++is specified. You must also specify both a
+ .BR \-from " and a " \-to
+ color.
+ .RE
+--- fluxbox-1.1.1+dfsg2.orig/doc/fbsetbg.1
++++ fluxbox-1.1.1+dfsg2/doc/fbsetbg.1
+@@ -32,12 +32,12 @@
+ .Ek
+ .Sh DESCRIPTION
+ .Nm
+-is a wrapper that tries to find a suitable background-setting app and
++is a wrapper that tries to find a suitable background\-setting app and
+ then tries to set the wallpaper using that app. You don't have to
+ configure fbsetbg. It just uses the first app it can find.
+ .Pp
+ Furthermore it supports remembering the last set wallpaper so you don't
+-have to edit the style or init-file to change the wallpaper.
++have to edit the style or init\-file to change the wallpaper.
+ .Pp
+ It aims to provide clear error messages in a window that make debugging
+ problems easy.
+@@ -66,9 +66,9 @@ Same as the uncapsed option but without
+ Set previous wallpaper. Or, if the random feature was last used, set
+ another random wallpaper from the same directory.
+ .It Fl i
+-Display usefull information about best wallpapersetter found.
++Display useful information about best wallpapersetter found.
+ .It Fl p
+-Display some usefull tips.
++Display some useful tips.
+ .It Fl h
+ Display a help message.
+ .El
+@@ -101,7 +101,7 @@ Recall the last set wallpaper on display
+ .Ar :0.0
+ with the stored options.
+ .Bd -literal -offset indent
+-$ DISPLAY=:0.0 fbsetbg -l
++$ DISPLAY=:0.0 fbsetbg \-l
+ .Ed
+ .Sh SEE ALSO
+ .Xr fbsetroot 1 ,
+--- fluxbox-1.1.1+dfsg2.orig/doc/fluxbox.1.in
++++ fluxbox-1.1.1+dfsg2/doc/fluxbox.1.in
+@@ -562,7 +562,7 @@ The possible tools are:
+ \h'-04'\(bu\h'+03'
+ \fBNextWindow\fR: This displays an arrow that switches focus to the next visible window on the current workspace\.
+ .RE
+-Other aspects of the toolbar can be configured in two ways: through the toolbar menu, which is accessable in the Configuration part of the RootMenu or with a right click on the edge the toolbar, or by editing the init file (see the RESOURCES section for more information about that)\.
++Other aspects of the toolbar can be configured in two ways: through the toolbar menu, which is accessible in the Configuration part of the RootMenu or with a right click on the edge the toolbar, or by editing the init file (see the RESOURCES section for more information about that)\.
+ .sp
+ .SS "Configuration via the Toolbar Menu"
+ All changes take effect immediately, except for a change of the "Toolbar Alpha", which needs a restart to make the change visible\. Here are the settings:

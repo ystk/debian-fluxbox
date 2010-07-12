@@ -1,0 +1,28 @@
+This package uses debdiff to apply patches to the fluxbox source.
+The list of patches are in debian/patches/, and patches to be applied are in 00list.
+
+480597.patch
+  Fixes a small bashism in the sh script.
+  This patch is not "needed", it will run
+  with a non-random number, but it is not
+  critical to run. ( all to do with time )
+
+513668.patch
+  Adds in some documentation info on the
+  fullscreen key. This is now upstream.
+  This is to apply it to the working deb
+  package.
+
+532094.patch
+  Attempts to patch bug 532094 see:
+  http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=532094
+
+  Unknown status.
+
+man-spelling-changes.patch
+  Fixes a few upstream spelling mistakes
+  in the man pages. Changes upstream.
+
+
+--
+Paul Tagliamonte <paultag@ubuntu.com>

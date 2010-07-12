@@ -1,0 +1,1 @@
+?package(fluxbox):needs="wm" section="Window Managers" title="FluxBox" command="/usr/bin/startfluxbox"

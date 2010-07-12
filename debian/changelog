@@ -1,0 +1,703 @@
+fluxbox (1.1.1+dfsg2-1) unstable; urgency=low
+
+  [ Paul Tagliamonte ]
+  [Denis Briand]
+  * Create extra directory to put all debian's styles and backgrounds.
+  * New default background, thanks to Thomas Guillot <gtom@gtom.eu>.
+  * Update copyright file with the CC-by-SA 3 license for
+    the background picture.
+  * Update copyright file with the 3-clause BSD license for
+    debian_squeeze_dark style file.
+
+  [Paul Tagliamonte]
+  * Added patch for fbsetbg scale behavior. (Closes: #583704).
+    Thanks to Jeremiah Mahler for his patch!
+  * The following themes have been merged from upstream under
+    a new license: arch, bloe, bora_black, bora_blue, bora_green
+    carp, green_tea, ostrich, zimek_bisque, zimek_darkblue,
+    zimek_green. They were moved from CC-BY-SA 2.5 to CC-BY-SA 3.0
+
+  [ Dmitry E. Oboukhov ]
+  * Switch to 3.0 (quilt) debian src format package.
+  * Repackage orig.tgz to +dfsg2 version to fix prev incorrect upload.
+  * Merge with all old patches.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Mon, 12 Jul 2010 15:23:08 +0400
+
+fluxbox (1.1.1+dfsg1-1) unstable; urgency=high
+
+  * New dfsg compatible source tarball (Closes: #584513).
+
+ -- Denis Briand <denis@narcan.fr>  Sat, 05 Jun 2010 18:36:22 +0200
+
+fluxbox (1.1.1-8) unstable; urgency=low
+
+  [Paul Tagliamonte]
+  * Bumped the deb stds version.
+
+  [Denis Briand]
+  * Upgrade libmagickcore-extra to libmagickcore3-extra build-dep.
+  * Add source/format file.
+  * Fix FTBFS with binutils-gold (Closes: #554386).
+  * Fix hyphen-used-as-minus-sign in fbrun and fbsetbg man pages.
+  * Allow centering fbrun popup (Closes: #550466).
+    Thanks to Ulrich Eckhardt for his patch.
+  * Debian Maintainer Upload is now allowed.
+
+ -- Denis Briand <denis@narcan.fr>  Wed, 19 May 2010 12:42:11 +0200
+
+fluxbox (1.1.1-7) unstable; urgency=low
+
+  [ Denis Briand ]
+  * Remove duplicate debhelper build-dependency.
+  * Remove several whitespaces into debian/ files.
+
+  [ Paul Tagliamonte ]
+  * Fixed issue with obsolete dep. closes: #573971.
+
+  [ Dmitry E. Oboukhov ]
+  * Add Denis Briand into uploaders list.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Sat, 20 Mar 2010 20:32:14 +0300
+
+fluxbox (1.1.1-6) unstable; urgency=low
+
+  * Previous change to Uploaders closes: #552328
+  * Adding in exit on fail to the preinst, as posted
+    in the spec.
+  * Added patch for changing some minor man spelling
+    errors.
+  * Removed bashism, Thank you Andres Mejia!, closes: #480597.
+
+ -- Paul Tagliamonte <paultag@ubuntu.com>  Sun, 14 Jan 2010 01:56:00 -0500
+
+fluxbox (1.1.1-5) unstable; urgency=low
+
+  * Added Paul Tagliamonte <paultag@ubuntu.com> to the Uploaders
+    field of the control file.
+  * Removed control.in.
+  * Changed rules to reflect the absence of a control.in.
+  * Added patch to fix the keybinding manpage, closes: #513668.
+
+ -- Paul Tagliamonte <paultag@ubuntu.com>  Mon, 14 Dec 2009 03:12:03 -0500
+
+fluxbox (1.1.1-4) unstable; urgency=low
+
+  * Fixed FTBFS 'wmf2eps: not found', closes: #556810.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Wed, 18 Nov 2009 12:09:10 +0300
+
+fluxbox (1.1.1-3) experimental; urgency=low
+
+  * In attempt to fix the bug #532094.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Mon, 29 Jun 2009 00:16:04 +0400
+
+fluxbox (1.1.1-2) unstable; urgency=low
+
+  * Created git-repo on git.debian.org.
+  * Added VCS-* records to debian/control.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Wed, 18 Mar 2009 22:47:41 +0300
+
+fluxbox (1.1.1-1) unstable; urgency=low
+
+  [New upstream version]
+    * Opaque moving is now default.
+    * Faster workspace switching, closes: #498623
+    	(please reopen if i am wrong)
+    Bug fixes:
+    * Install issues.
+    * Maximize/Fullscreen for windows with non-northwest gravity.
+    * Randr < 1.2 checks.
+    * Workaround for badly specified _NET_WM_ICONS.
+    * Fixed unshade crash.
+    * Minor pixmap resource leak.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Fri, 19 Sep 2008 11:25:49 +0400
+
+fluxbox (1.1.0.1-2) unstable; urgency=low
+
+  * Fix program crashes caused by unshading, closes: #498535.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Fri, 12 Sep 2008 10:28:51 +0400
+
+fluxbox (1.1.0.1-1) unstable; urgency=low
+
+  * New upstream version, closes: #375709, #437983, #175339, #222089.
+  * Added 'Debian' theme.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Wed, 03 Sep 2008 20:45:23 +0400
+
+fluxbox (1.0.0+deb1-9) unstable; urgency=low
+
+  * Added background with debian logo into default theme.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Sun, 03 Aug 2008 18:18:16 +0400
+
+fluxbox (1.0.0+deb1-8) unstable; urgency=low
+
+  * x-dev has been removed from build-depends (out-of-date package).
+  * Standards-Version bumped to 3.8.0.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Tue, 01 Jul 2008 10:38:14 +0400
+
+fluxbox (1.0.0+deb1-7) unstable; urgency=low
+
+  * Removed xsession-manager link, closes: #462914.
+  * patch for man fbrun.1 (option -nearmouse),
+     thanks Ken Bloom <kbloom@gmail.com>, closes: #478646.
+  * My email address has been changed.
+  * Fix debian/watch.
+
+ -- Dmitry E. Oboukhov <unera@debian.org>  Thu, 29 May 2008 23:19:22 +0400
+
+fluxbox (1.0.0+deb1-6) unstable; urgency=low
+
+  * Added xsession-manager link to alternatives system, closes: #462914.
+  * Added debian/watch file.
+  * Added 'debian/create-git-package.sh' script for build git-snapshots.
+  * Upload sponsored by Al Nikolov <clown@debian.org>.
+
+ -- Dmitry E. Oboukhov <dimka@avanto.org>  Mon, 28 Jan 2008 17:47:19 +0300
+
+fluxbox (1.0.0+deb1-5) unstable; urgency=low
+
+  * Patch for Turkish language, thanks acemi <acemi.mail@gmail.com>,
+    closes: #459600.
+  * Upload sponsored by Al Nikolov <clown@debian.org>.
+
+ -- Dmitry E. Oboukhov <dimka@avanto.org>  Mon, 07 Jan 2008 17:46:50 +0300
+
+fluxbox (1.0.0+deb1-4) unstable; urgency=low
+
+  * Fix 'FTBFS with GCC 4.3', with directly #include everything we use.
+    Closes: #456045.
+  * Use Tarball-Inside-a-Tarball Build System (cdbs).
+  * Change control::Standards-Version to 3.7.3.
+  * Homepage field added.
+  * Upload sponsored by Al Nikolov <clown@debian.org>
+
+ -- Dmitry E. Oboukhov <dimka@avanto.org>  Thu, 13 Dec 2007 11:33:32 +0300
+
+fluxbox (1.0.0-3) unstable; urgency=low
+
+  * Move menuitem from 'WindowManagers' to 'Window Managers' (close lintian
+    warning).
+  * Patch for using another default style.
+  * Management by debian/control generated by cdbs system is used here.
+  * Upload sponsored by Al Nikolov <clown@debian.org>
+
+ -- Dmitry E. Oboukhov <dimka@avanto.org>  Wed, 05 Dec 2007 13:14:50 +0300
+
+fluxbox (1.0.0-2) unstable; urgency=low
+
+  * Enable support of the XShape extension, closes: #450684.
+
+ -- Dmitry E. Oboukhov <dimka@avanto.org>  Fri, 09 Nov 2007 21:25:58 +0300
+
+fluxbox (1.0.0-1) unstable; urgency=low
+
+  * New upstream version.
+  * Unreproducible bug 'crash when trying to start applications while using a
+    locale that isnt found in the fluxbox-package', closes: #438468.
+  * Removed Matt Hope from uploaders (he is Missing In Action).
+  * Upload sponsored by Al Nikolov <clown@debian.org>.
+
+ -- Dmitry E. Oboukhov <dimka@avanto.org>  Tue, 09 Oct 2007 00:21:25 +0400
+
+fluxbox (1.0~rc3-5) unstable; urgency=low
+
+  * Removed 'xfonts-artwiz' from Suggests, closes: #439649.
+  * Patch for russian language, closes: #438095.
+  * Upload sponsored by Al Nikolov <clown@debian.org>.
+
+ -- Dmitry E. Oboukhov <dimka@avanto.org>  Sat, 01 Sep 2007 14:20:09 +0400
+
+fluxbox (1.0~rc3-4) unstable; urgency=low
+
+  * Patch for fix bug: 'no fullscreen with openoffice.org', closes: #436807.
+  * Unreproducible in current version (1.0~rc3):
+    Xawtv flips out on fluxbox, closes: #269683.
+
+ -- Dmitry E. Oboukhov <dimka@avanto.org>  Thu, 09 Aug 2007 23:14:53 +0400
+
+fluxbox (1.0~rc3-3) unstable; urgency=low
+
+  * Patch for fix bug: 'window placement screwed up with xinerama/fluxbox',
+    closes: #261114, #416251.
+  * Patch for fix bug: 'fluxbox locks up when using skype', closes: #432493.
+  * Patch for fix bug: 'no longer interprets mod5 modifier', closes: #432073.
+  * Returned fluxbox.desktop to /usr/share/xsessions/,
+    closes: #130282, #433184.
+  * Change maintainer record.
+  * Upload sponsored by Al Nikolov <alnikolov@narod.ru>.
+
+ -- Dmitry E. Oboukhov <dimka@avanto.org>  Tue, 10 Jul 2007 14:43:27 +0400
+
+fluxbox (1.0~rc3-2) unstable; urgency=low
+
+  * Fixed building with gcc 4.3 (closes: #417188).
+  * Fixed (or unreproducible) in current version (1.0rc3):
+    * Time in fluxbox taskbar does not get updated when timezone changed
+      (closes: #250738).
+    * Menu not updated (closes: #324280).
+    * Put gsetroot in suggest for fluxbox (closes: #360306).
+    * Clicking window with MouseFocus should also focus (closes: #370328).
+    * Wrong OOo opt window sizing (closes: #420484).
+    * Doesn't work properly with a borderless Eterm (closes: #386098).
+    * Maximized window conceals desktop (closes: #263415).
+    * Leaves display manager info file to /var/lib/menu-xdg/xsessions after
+      purge (closes: #407372).
+    * Old style tabs (closes: #263330).
+  * Debian menu system works with fluxbox (closes: #251105, #293755).
+  * Missing and non-free lucida fonts in default styles are replaced to dejavu,
+    closes: #405115).
+  * Patch to set background image in style applied (closes: #355378).
+  * Upload sponsored by Al Nikolov <alnikolov@narod.ru>.
+
+ -- Dmitry E. Oboukhov <dimka@avanto.org>  Fri, 29 Jun 2007 19:25:49 +0400
+
+fluxbox (1.0~rc3-1) unstable; urgency=low
+
+  * New record in control::Uploaders: Dmitry E. Oboukhov <dimka@avanto.org>.
+  * Fixed (or unreproducible) in current version (1.0rc3):
+    * alt-tab is cycling out of order and skipping windows (closes: #263883).
+    * misterously disappearing menu (closes: #312808).
+    * hangs at start up if stderr is a terminal (closes: #392460).
+    * starts with empty menu (closes: #412857).
+    * Minimal window width of some applications too high (closes: #176310).
+    * /usr/bin/bsetroot: xsetroot does *not* honour multiple screens at all
+     (closes: #230800).
+    * Xine's main UI panel doesn't reappear after hiding it (closes: #268905).
+    * Homedir config files don't override defaults (closes: #271208).
+    * fluxbox produce zombies (closes: #281208).
+    * artwiz fonts don't display anymore (closes: #292554).
+    * javascript msgbox at firefox "suspend" xscreensaver lock
+     (closes: #298801).
+    * Fluxbox decoración y xmms (closes: #311669).
+    * firefox loses focus gained previously with Alt+Tab (closes: #319640).
+    * fbsetbg(1) manual refers to non-existing command bsetroot
+     (closes: #335218).
+    * fluxbox menu workspaces->someworkspace->app operations affect wrong app
+     (closes: #343838).
+    * Closing tabbed xterms moves windows down (closes: #357153).
+    * autogrouping tabs with ~/.fluxbox/groups broken (closes: #357690).
+    * Toolbar alpha settings discarded on log (closes: #375435).
+    * fluxbox 0.9.11 crash my system (closes: #292682).
+    * Update of fluxbox causes menu to show too many items (closes: #188124).
+    * fluxbox 0.1.14-2: strange char in time string (closes: #224761).
+    * session.keyFile in ~/.fluxbox/.init points to /etc/X11/fluxbox/keys
+      (closes: #297274).
+    * x-cursor for resize handles (closes: #310900).
+    * Missing locale directory (closes: #312104).
+    * Menu title texture does not always update (closes: #319608).
+    * relies on existence of $HOME/.fluxbox (closes: #348321).
+    * failure to override global textColor for unfocused window titles
+     (closes: #353387).
+    * [fbsetroot] Warning: Failed to open file
+      (/usr/share/fluxbox/nls/en_US/fluxbox.cat) (closes: #365867).
+    * FTBFS with G++ 4.1: namespace and extra qualification errors
+     (closes: #357490).
+    * key shortcut binding on latest fluxbox (closes: #260550).
+    * fonts and remeber workspace not working on ppc (closes: #292974).
+    * Anti aliasing is not activated by default. (closes: #302167).
+  * Patch from svn for fix bug:
+      'error start fluxbox if directory ~/.fluxbox does not exists'
+      (closes: #430673).
+  * Removed old 'alternatives' from 'fluxbox' (closes: #430675).
+
+ -- Dmitry E. Oboukhov <dimka@avanto.org>  Tue, 26 Jun 2007 16:39:32 +0400
+
+fluxbox (1.0~rc3-0.1) unstable; urgency=low
+
+  * Non-maintainer upload.
+  * New upstream release 1.0rc3.
+  * UTF-8 is now maintained in upstream. Closes: #397482.
+  * Patch from svn fixing clock width calculation applied. Closes: #410304.
+  * Removed diverts for bsetroot/bsetbg. Closes: #427044.
+  * Removed duplicates in Build-Depends. Closes: #421226.
+  * Added recursive change 'bsetroot' to 'fbsetroot' in
+    all style files.
+  * Instead of manual file moves and other hacks, just passing proper flags
+    to ./configure call.
+  * Removed incorrect debian/watch.
+  * Changed update-alternatives target from /usr/bin/fluxbox to
+    /usr/bin/startfluxbox.
+  * Removed the files no longer used for packaging.
+  * Fixed debhelper/cdbs using issues.
+  * Used dpatch to manage patches.
+  * Upload sponsored by Al Nikolov <alnikolov@narod.ru>.
+
+ -- Dmitry E. Oboukhov <dimka@avanto.org>  Fri, 22 Jun 2007 00:58:01 +0400
+
+fluxbox (0.9.15.1+1.0rc2-1) experimental; urgency=low
+
+  * New upstream release 1.0rc2
+
+ -- Matt Hope <dopey@debian.org>  Tue,  4 Jul 2006 19:30:11 +1000
+
+fluxbox (0.9.15.1+1.0rc0-1) experimental; urgency=low
+
+  * New upstream release - 1.0rc
+
+ -- Matt Hope <dopey@debian.org>  Wed, 14 Jun 2006 17:37:24 +1000
+
+fluxbox (0.9.14-1.2) unstable; urgency=low
+
+  * NMU as part of the GCC 4.1 transition.
+  * Declare the namespace
+           (Closes: Bug#357490)
+
+ -- Martin Michlmayr <tbm@cyrius.com>  Fri, 26 May 2006 16:08:18 +0200
+
+fluxbox (0.9.14-1.1) unstable; urgency=low
+
+  * Non-maintainer upload.
+  * Remove Build-Dependency on xlibs-dev (Closes: #346659).
+  * Credit and Big Thanks to Justin Pryzby <justinpryzby@users.sourceforge.net>
+    for the patch and testing.
+
+ -- Amaya Rodrigo Sastre <amaya@debian.org>  Wed, 18 Jan 2006 16:24:27 +0100
+
+fluxbox (0.9.14-1) unstable; urgency=low
+
+  * New version from upstream
+      - Renames 'bsetroot' to 'fbsetroot'
+           (Closes: Bug#308052, Bug#309958, Bug#319094)
+      - Fixes to font handling
+           (Closes: Bug#262305, Bug#300531, Bug#295941)
+  * Updated fluxbox.desktop to use startfluxbox
+           (Closes: Bug#314644)
+
+ -- Matt Hope <dopey@debian.org>  Sat,  1 Oct 2005 15:48:02 +1000
+
+fluxbox (0.9.13-1) unstable; urgency=low
+
+  * New upstream release
+
+ -- Matt Hope <dopey@debian.org>  Fri,  8 Jul 2005 01:43:30 +1000
+
+fluxbox (0.9.12-1) unstable; urgency=low
+
+  * New upstream release
+
+ -- Matt Hope <dopey@debian.org>  Tue, 18 Jan 2005 10:53:59 +1100
+
+fluxbox (0.9.11-1sarge0) testing-proposed-updates; urgency=high
+
+  * Fix for Severity=critical bug (Closes: Bug#310050)
+     - Cleans up old divert for bsetbg (See: Bug#263512)
+     - Patch from 'martin f krafft'
+
+ -- Matt Hope <dopey@debian.org>  Sat, 21 May 2005 22:02:22 +1000
+
+fluxbox (0.9.11-1) unstable; urgency=low
+
+  * New upstream release
+      (Closes: Bug#285999)
+     - Fixes FTBFS
+         (Closes: Bug#285956)
+     - Fixes possible DOS (CAN-2004-1204)
+         (Closes: Bug#285819)
+
+  * Added martin f. krafft to "Uploaders:"
+  * 'bsetbg' references
+    - Removed diverts (Closes: Bug#263512)
+    - Removed manpage (Closes: Bug#252872)
+  * Finally put 'fluxbox-kde' to rest (removed from ./debian/control)
+  * Replaced ./debian/watch entry [sourceforge urls changing]
+    (Closes: Bug#276646)
+  * Updated 'menu' depends
+    (Closes: Bug#266217)
+  * Added details about some keybinding changes to NEWS.Debian
+    (Closes: 269404) (Thanks for madduck for examples)
+  * Added 'fbpager' and 'fbdesk' to "Suggests:"
+
+ -- Matt Hope <dopey@debian.org>  Mon, 20 Dec 2004 17:26:09 +1100
+
+fluxbox (0.9.9-1) unstable; urgency=low
+
+  * New upstream release
+    - Was going to upload to "experimental", but convinced otherwise.
+
+ -- Matt Hope <dopey@debian.org>  Fri, 30 Apr 2004 10:04:06 +1000
+
+fluxbox (0.1.14-4) unstable; urgency=low
+
+  * Using new gdm session, however leaving old file in place for time being
+    (Closes: Bug#240976)
+  * Okay, so Build-Conflicts: libxft2 wasn't the best solution...
+    Fixed the Build-{Depends,Conflicts}
+    (Closes: Bug#237686)
+  * Fixed up menu-escaping
+    (Closes: Bug#197266)
+
+ -- Matt Hope <dopey@debian.org>  Tue, 27 Apr 2004 23:04:01 +1000
+
+fluxbox (0.1.14-3) unstable; urgency=low
+
+  * strftime fixes from upstream authors. (Thanks Simon!)
+    (Closes: Bug#218431, Bug#217282)
+  * removed {postinst,prerm} call to 'wm-menu-config'
+    This is not needed, as the functionality is provided by debhelper
+    (Closes: Bug#197596)
+  * Added libxft2 to Build-Conflicts
+    (Closes: Bug#237008)
+  * Changed 'outputencoding' in menu-method, as Bill Allombert suggested
+    (Closes: Bug#234578)
+  * Included 'fbrun' manpage from Brian Boucheron
+    (Closes: Bug#233841)
+
+ -- Matt Hope <dopey@debian.org>  Tue,  9 Dec 2003 12:21:37 +1100
+
+fluxbox (0.1.14-2) unstable; urgency=low
+
+  * Applied patch from upstream to fix gcc3.3 compile errors
+    (Closes: Bug#196249)
+
+  * debian/fluxbox.menu-method
+    Added [ outputencoding="ISO-8859-1" ] as suggested
+    by Bill Allombert in debian-devel-announce <20030704185541.GZ1545@seventeen>
+    (Closes: Bug#200141)
+
+  * debian/fluxbox.postrm;
+    Applied patch from Yves Junqueira to debian/fluxbox.postrm
+    (Closes: Bug#195705)
+
+  * Applied (modified) patch from #208814 to fix error processing translations
+    (Closes: Bug#209144, Bug#205974)
+
+ -- Matt Hope <dopey@debian.org>  Fri, 10 Oct 2003 17:03:01 +1000
+
+fluxbox (0.1.14-1) unstable; urgency=low
+
+  ``Lets hack on the laptop during linux.conf.au 2003!''
+                     -- Greetings from Perth, Australia.
+                               http://conf.linux.org.au/
+
+  * New upstream release
+    * Tab on restart fixed
+    * New workspace names fixed (Closes: Bug#172564)
+
+  * Package now includes ``fluxbox-generate_menu''
+  * Changed `menu' suggest->depend.
+  * Removed 'Provides: fluxbox-kde' as kde support was pulled in *ages* ago.
+  * Removed 'Provides: blackbox' because it was an ugly hack.
+    Packages which work with fluxbox should have an alternate depends.
+
+ -- Matt Hope <dopey@debian.org>  Wed, 22 Jan 2003 15:24:15 +0800
+
+fluxbox (0.1.13-1) unstable; urgency=low
+
+  ``dopey's sleep deprivation experiment''
+
+  * New upstream release
+    - Fixes max-window-size bug
+      (Closes: Bug#159709)
+    - Fixes FTFBS: hppa
+      (Closes: Bug#164540)
+    - Fixes Window Menu for pt_BR
+      (Closes: Bug#168921, Bug#168929)
+    - Vertical tabs in Multi-head/xinerama setups fixed.
+      (Closes: Bug#158601)
+  * Applied upstream bugfix1
+    (Closes: Bug#171655)
+
+ -- Matt Hope <dopey@debian.org>  Tue, 19 Nov 2002 23:51:14 +1100
+
+fluxbox (0.1.12-2) unstable; urgency=low
+
+  * Fixes FTBFS on HPPA. (-ffunction-sections)
+    (Closes: Bug#164540)
+  * Opps, should have closed this last time (New version 0.1.12)
+    (Closes: Bug#162021)
+
+ -- Matt Hope <dopey@debian.org>  Sat,  2 Nov 2002 16:12:08 +1100
+
+fluxbox (0.1.12-1) unstable; urgency=low
+
+  * New upstream release
+    - Problems with fluxbox not returning focus fixed.
+      (Closes: Bug#158806, Bug#159701)
+    - Maximizes to incorrect tab height fixed
+      (Closes: Bug#159109)
+    - Shaded windows with multiple tabs no longer
+      unshade when changing themes
+      (Closes: Bug#159222)
+    - Restart no longer re-iconizes windows
+      (Closes: Bug#159761)
+
+  * Replaced the menu system.
+    (Closes: Bug#158600)
+
+ -- Matt Hope <dopey@debian.org>  Fri, 13 Sep 2002 11:33:30 +1000
+
+fluxbox (0.1.10-2) unstable; urgency=low
+
+  * Much self-flagellation over leaving accidental cruft in
+    debian/fluxbox.menu-method
+    (Closes: Bug#157876)
+
+  * Applied patch from Simon Bowden to fix
+    ``fluxbox does not send windows to new workspaces''
+    (Closes: Bug#150213)
+
+  * Destroyed reminants of fluxbox-kde
+
+ -- Matt Hope <dopey@debian.org>  Sat, 24 Aug 2002 22:25:12 +1000
+
+fluxbox (0.1.10-1) unstable; urgency=low
+
+  * I finally give in to popular pressure...
+  * New upstream release
+  * Yup, new version (Closes: Bug#154752)
+
+ -- Matt Hope <dopey@debian.org>  Wed, 21 Aug 2002 21:51:43 +1000
+
+fluxbox (0.1.9-2) unstable; urgency=low
+
+  * Applied change from Michael Beattie to fix slit support in
+    Xinerama.
+
+ -- Matt Hope <dopey@debian.org>  Thu, 20 Jun 2002 23:37:22 +1000
+
+fluxbox (0.1.9-1) unstable; urgency=low
+
+  * New upstream release
+  * Applied patch to enable NLS from kita@kitaj.no-ip.com
+  * Applied upstream bugfix 2
+
+ -- Matt Hope <dopey@debian.org>  Sat, 25 May 2002 23:53:06 +1000
+
+fluxbox (0.1.8-1) unstable; urgency=low
+
+  * New upstream release.
+  * Now includes xinerama support.
+  * Included menu-method patch from Grant Hollingworth <grant@antiflux.org>
+    [ menu file should not escape '(' ]
+    (Closes: Bug#143096)
+  * Applied upstream bugfix 1 and 2.
+  * Applied font-fix patch from Sang-Hoon RHEE <rhee@linux.dnip.net>
+    (Closes: Bug#145709)
+  * Fixed debian/control, two `Provides' lines.
+    (Closes: Bug#147659)
+
+ -- Matt Hope <dopey@debian.org>  Wed, 22 May 2002 10:46:53 +1000
+
+fluxbox (0.1.7-3) unstable; urgency=medium
+
+  * Fixes previous idiocy trying to combine `fluxbox' and `fluxbox-kde'
+    back together, removes the `fluxbox-kde' virtual package.
+
+ -- Matt Hope <dopey@debian.org>  Fri, 12 Apr 2002 22:08:52 +1000
+
+fluxbox (0.1.7-2) unstable; urgency=medium
+
+  * Updated postinst call to ``kde-update-menu''
+    (Closes: Bug#139439)
+  * Changed fonts in the following themes:
+    Makro, MerleyKay, Clean, CleanColor, Rampage
+    to not use `iso8859-1', rather `iso8859-*'. I believe this will
+    fix the `euro locales' problem.
+    (Closes: Bug#137349)
+
+ -- Matt Hope <dopey@debian.org>  Wed,  3 Apr 2002 22:34:18 +1000
+
+fluxbox (0.1.7-1) unstable; urgency=medium
+
+  * New upstream release.
+    (Closes: Bug#135984)
+  * urgency=medium - prevents upgrade of gdm.
+  * Conflicts with gdm (<< 2.2.5.4) as older versions had session
+    files in /etc/X11/gdm/Sessions .. newer versions are /etc/gdm/Sessions
+  * Moved session file back to /etc/gdm/Sessions
+    (Closes: Bug#136336)
+  * Corrected typo in package description.
+    (Closes: Bug#136855)
+  * Now ``Provides: blackbox'' [suggested: overridex@punkass.com] to allow
+    some of the blackbox applications, such as bbmail, bbpager, bblaunch.
+  * Included patch from Tommi Komulainen <Tommi.Komulainen@iki.fi>
+  * Upstream 0.1.7-bugfix1
+    - Fixes problems with withdrawn applications
+  * Now KDE support is in the main binary.
+    - fluxbox-kde a [temp] virtual package to help move users over.
+
+ -- Matt Hope <dopey@debian.org>  Sat,  9 Mar 2002 11:04:57 +1100
+
+fluxbox (0.1.6-2) unstable; urgency=medium
+
+  * urgency=medium as 0.1.6-1 can be unusable in some conditions.
+  * Upstream 0.1.6-bugfix1
+    - Fixes some problems with title-less windows such as xmms or
+      Sylpheed.
+  * Upstream 0.1.6-bugfix2
+    - Fixes problems with a tilde (~) in menu.
+  * Includes text-ised FAQ from web-site, closes: Bug#129231
+  * Included 'convertkeys' (see Bug#129230), closes: Bug#129230
+  * Moved gdm session from /etc/gdm/Sessions to /etc/X11/gdm/Sessions
+    previously this caused problems, causing gdm not to work properly
+    if installed after fluxbox.
+
+ -- Matt Hope <dopey@debian.org>  Tue, 12 Feb 2002 20:36:31 +1100
+
+fluxbox (0.1.6-1) unstable; urgency=low
+
+  * New upstream release
+  * Updated config.{guess,sub} to 2002-01-02 (see: Bug#127540)
+  * Fixed broken postinst for fluxbox-kde, closes: Bug#128112.
+  * Fixed menu system for fluxbox-kde, closes: Bug#128295.
+  * Upstream has updated manpage, closes: Bug#128478
+
+ -- Matt Hope <dopey@debian.org>  Sat, 12 Jan 2002 13:12:42 +1100
+
+fluxbox (0.1.5-3) unstable; urgency=low
+
+  * _Another_ new config.guess, dated 2002-01-02 which replaces a previous
+    config.guess (2001-12-13) which was broken on mips.
+    (Closes: #127540)
+
+ -- Matt Hope <dopey@debian.org>  Sat,  5 Jan 2002 01:10:40 +1100
+
+fluxbox (0.1.5-2) unstable; urgency=medium
+
+  * Applied upstream bbtools patch. (from http://fluxbox.sf.net/news.php?page=1)
+  * Updated config.{guess,sub}. (closes: #126828)
+  * Removed KDE dependencies.
+  * Fixed the fluxbox-kde menu support.
+
+ -- Matt Hope <dopey@debian.org>  Tue,  1 Jan 2002 18:30:27 +1100
+
+fluxbox (0.1.5-1) unstable; urgency=low
+
+  * Split fluxbox-kde into a separate binary package.
+  * Put upstream installation information into /usr/share/doc/fluxbox/
+    (closes: #122508)
+  * New upstream release
+  * Marked extra files as conffiles
+
+ -- Matt Hope <dopey@quickstix.com.au>  Sun, 16 Dec 2001 14:35:00 +1100
+
+fluxbox (0.1.4-3) unstable; urgency=low
+
+  * Replaced package description (closes: #121178)
+  * Removed surplus "examples" directory in debian/dirs and restored
+    README.Debian (closes: #121259)
+  * Fixed errors in preinst. (closes: #121260, #121264)
+  * Modified GDM session script to use /etc/X11/Xsession (closes: #121261)
+  * Included /etc/gdm/Sessions/fluxbox as a conffile.
+
+ -- Matt Hope <dopey@quickstix.com.au>  Thu, 29 Nov 2001 01:55:19 +1100
+
+fluxbox (0.1.4-2) unstable; urgency=low
+
+  * Updated config.{guess,sub}, closes: #120773
+
+ -- Matt Hope (Dopey) <dopey@quickstix.com.au>  Sat, 24 Nov 2001 12:38:20 +1100
+
+fluxbox (0.1.4-1) unstable; urgency=low
+
+  * Initial release, closes: #118738
+  * Integrated with debian menu system
+
+ -- Matt Hope (Dopey) <dopey@quickstix.com.au>  Wed,  7 Nov 2001 22:38:54 +1100

@@ -1,0 +1,4 @@
+version=3
+opts=dversionmangle=s/\+dfsg// \
+http://fluxbox.org/download/ \
+	.*fluxbox-(\d+(?:\.\d+){2,3}).t(?:ar\.gz|gz|ar\.bz2).*

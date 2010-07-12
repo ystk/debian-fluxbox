@@ -1,0 +1,94 @@
+Description: Upstream changes introduced in version 1.1.1+dfsg2-1
+ This patch has been created by dpkg-source during the package build.
+ Here's the last changelog entry, hopefully it gives details on why
+ those changes were made:
+ .
+ fluxbox (1.1.1+dfsg2-1) UNRELEASED; urgency=low
+ .
+   [ Paul Tagliamonte ]
+   [Denis Briand]
+   * Create extra directory to put all debian's styles and backgrounds.
+   * New default background, thanks to Thomas Guillot <gtom@gtom.eu>.
+   * Update copyright file with the CC-by-SA 3 license for
+     the background picture.
+   * Update copyright file with the 3-clause BSD license for
+     debian_squeeze_dark style file.
+ .
+   [Paul Tagliamonte]
+   * Added patch for fbsetbg scale behavior. (Closes: #583704).
+     Thanks to Jeremiah Mahler for his patch!
+   * The following themes have been merged from upstream under
+     a new license: arch, bloe, bora_black, bora_blue, bora_green
+     carp, green_tea, ostrich, zimek_bisque, zimek_darkblue,
+     zimek_green. They were moved from CC-BY-SA 2.5 to CC-BY-SA 3.0
+ .
+   [ Dmitry E. Oboukhov ]
+   * Switch to 3.0 (quilt) debian src format package.
+   * Repackage orig.tgz to +dfsg2 version to fix prev incorrect upload.
+   * Merge with all old patches.
+ .
+ The person named in the Author field signed this changelog entry.
+Author: Dmitry E. Oboukhov <unera@debian.org>
+Bug-Debian: http://bugs.debian.org/583704
+
+---
+The information above should follow the Patch Tagging Guidelines, please
+checkout http://dep.debian.net/deps/dep3/ to learn about the format. Here
+are templates for supplementary fields that you might want to add:
+
+Origin: <vendor|upstream|other>, <url of original patch>
+Bug: <url in upstream bugtracker>
+Bug-Debian: http://bugs.debian.org/<bugnumber>
+Forwarded: <no|not-needed|url proving that it has been forwarded>
+Reviewed-By: <name and email of someone who approved the patch>
+Last-Update: <YYYY-MM-DD>
+
+--- fluxbox-1.1.1+dfsg2.orig/util/fbrun/main.cc
++++ fluxbox-1.1.1+dfsg2/util/fbrun/main.cc
+@@ -60,6 +60,7 @@ void showUsage(const char *progname) {
+         "   -display [display string]   Display name"<<endl<<
+         "   -pos [x] [y]                Window position in pixels"<<endl<<
+         "   -nearmouse                  Window position near mouse"<<endl<<
++        "   -centered                   Window position centered on screen"<<endl<<
+         "   -fg [color name]            Foreground text color"<<endl<<
+         "   -bg [color name]            Background color"<<endl<<
+         "   -na                         Disable antialias"<<endl<<
+@@ -74,6 +75,7 @@ int main(int argc, char **argv) {
+     bool set_height = false, set_width=false; // use height/width of font by default
+     bool set_pos = false; // set position
+     bool near_mouse = false; // popup near mouse
++    bool centered = false; // popup centered on screen
+     bool antialias = true; // antialias text
+     string fontname; // font name
+     string title("Run program"); // default title
+@@ -105,6 +107,9 @@ int main(int argc, char **argv) {
+         } else if (strcmp(argv[i], "-nearmouse") == 0) {
+             set_pos = true;
+             near_mouse = true;
++        } else if (strcmp(argv[i], "-centered") == 0) {
++            set_pos = true;
++            centered = true;
+         } else if (strcmp(argv[i], "-fg") == 0 && i+1 < argc) {
+             foreground = argv[++i];
+         } else if (strcmp(argv[i], "-bg") == 0 && i+1 < argc) {
+@@ -213,6 +218,20 @@ int main(int argc, char **argv) {
+             }
+         }
+ 
++        if (centered) {
++            Display* dpy = FbTk::App::instance()->display();
++            unsigned int root_w = WidthOfScreen(DefaultScreenOfDisplay(dpy));
++            unsigned int root_h = HeightOfScreen(DefaultScreenOfDisplay(dpy));
++            x = (root_w-fbrun.width())/2;
++            y = (root_h-fbrun.height())/2;
++            /* TODO: this will center the popup on the root window, but in
++            the case of Xinerama it should rather center it on one screen.
++            Question remains on which of them ... maybe use the one the
++            pointer is in, like the code for 'nearmouse' does? Alternatively,
++            allow defining a 'main' screen, that should then be applied to
++            the 'nearmouse' handling, too. */
++        }
++
+         if (set_pos)
+             fbrun.move(x, y);
+ 

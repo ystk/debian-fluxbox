@@ -1,0 +1,7 @@
+debian/system.fluxbox-menu		/etc/X11/fluxbox/
+debian/fluxbox.menu-user		/etc/X11/fluxbox/
+debian/fluxbox.desktop			/usr/share/xsessions/
+debian/extra/styles/Debian		/usr/share/fluxbox/styles/
+debian/extra/styles/debian_squeeze_dark	/usr/share/fluxbox/styles/
+debian/extra/backgrounds/wallpaper-flux-debian-lighting-black-1600x1200.svg	/usr/share/fluxbox/wallpaper-flux-debian-lighting-black-1600x1200.svg
+debian/extra/backgrounds/debian-blueish-wallpaper.svg	/usr/share/fluxbox/debian-blueish-wallpaper.svg

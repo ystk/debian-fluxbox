@@ -1,0 +1,50 @@
+Description: Upstream changes introduced in version 1.1.1+dfsg2-1
+ This patch has been created by dpkg-source during the package build.
+ Here's the last changelog entry, hopefully it gives details on why
+ those changes were made:
+ .
+ fluxbox (1.1.1+dfsg2-1) UNRELEASED; urgency=low
+ .
+   [Denis Briand]
+   * Create extra directory to put all debian's styles and backgrounds.
+   * New default background, thanks to Thomas Guillot <gtom@gtom.eu>.
+   * Update copyright file with the CC-by-SA 3 license for
+     the background picture.
+   * Update copyright file with the 3-clause BSD license for
+     debian_squeeze_dark style file.
+ .
+   [Paul Tagliamonte]
+   * Added patch for fbsetbg scale behavior. (Closes: #583704).
+     Thanks to Jeremiah Mahler for his patch!
+   * The following themes have been merged from upstream under
+     a new license: arch, bloe, bora_black, bora_blue, bora_green
+     carp, green_tea, ostrich, zimek_bisque, zimek_darkblue,
+     zimek_green. They were moved from CC-BY-SA 2.5 to CC-BY-SA 3.0
+ .
+ The person named in the Author field signed this changelog entry.
+Author: Paul Tagliamonte <paultag@ubuntu.com>
+Bug-Debian: http://bugs.debian.org/583704
+
+---
+The information above should follow the Patch Tagging Guidelines, please
+checkout http://dep.debian.net/deps/dep3/ to learn about the format. Here
+are templates for supplementary fields that you might want to add:
+
+Origin: <vendor|upstream|other>, <url of original patch>
+Bug: <url in upstream bugtracker>
+Bug-Debian: http://bugs.debian.org/<bugnumber>
+Forwarded: <no|not-needed|url proving that it has been forwarded>
+Reviewed-By: <name and email of someone who approved the patch>
+Last-Update: <YYYY-MM-DD>
+
+--- fluxbox-1.1.1+dfsg2.orig/util/fbsetbg
++++ fluxbox-1.1.1+dfsg2/util/fbsetbg
+@@ -443,7 +443,7 @@ case $WPSETTER in
+         full='--bg-scale'
+         tile='--bg-tile'
+         center='--bg-center'
+-        aspect=$full
++        aspect='--bg-fill'
+         debugstory=$standardok
+         ;;
+     hsetroot)
