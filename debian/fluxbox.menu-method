@@ -1,0 +1,26 @@
+#!/usr/bin/install-menu
+#
+# Generates fluxbox menus for all registered applications.
+# (taken from Blackbox)
+compat="menu-1"
+outputencoding="LOCALE"
+
+!include menu.h
+
+genmenu="menudefs.hook"
+examplercfile="system.fluxbox-menu"
+rcfile="fluxbox-menu"
+rootprefix="/etc/X11/fluxbox/"
+userprefix=".fluxbox/"
+treewalk=M)
+
+supported
+    x11=   nstring(level(), "   ") "[exec] (" esc($title, ")") ") {" esc($command, "()") "} <" esc($icon, "<>") ">\n"
+    wm=	   nstring(level(), "   ") "[restart] ("  esc($title, ")")  ")  {" esc($command, "()") "}\n"
+    text=  nstring(level(), "   ") "[exec] (" esc($title, ")") ") { x-terminal-emulator -T \"" $title "\" -e " esc($command, "()") "} <" esc($icon, "<>") ">\n"
+    fluxbox= nstring(level(), "   ") "[" esc($command, "()") "] (" esc($title, ")") ")\n"
+endsupported
+
+startmenu= ""
+submenutitle= nstring(level(), "   ") "[submenu] (" esc($title,"()") ") {" esc($longtitle,"()") "}\n"
+endmenu= ifneq( level(), "0",  nstring(level(), "   ") "[end]\n" )

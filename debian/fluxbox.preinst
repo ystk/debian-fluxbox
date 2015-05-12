@@ -1,0 +1,21 @@
+#!/bin/sh
+
+set -e
+
+# Remove old diverts
+if [ "$1" = "upgrade" ]; then
+  if dpkg-divert --list | grep -q fluxbox; then
+    dpkg-divert --package fluxbox --remove --rename --divert \
+      /usr/bin/bsetroot.blackbox /usr/bin/bsetroot
+
+    dpkg-divert --package fluxbox --remove --rename --divert \
+      /usr/share/man/man1/bsetroot.blackbox.1.gz \
+      /usr/share/man/man1/bsetroot.1.gz
+  fi
+
+  # old version contain 'fluxbox' current - 'startfluxbox'
+    update-alternatives --remove x-window-manager /usr/bin/fluxbox
+
+fi
+
+#DEBHELPER#

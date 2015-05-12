@@ -1,0 +1,3 @@
+debian/system.fluxbox-menu		/etc/X11/fluxbox/
+debian/fluxbox.menu-user		/etc/X11/fluxbox/
+debian/fluxbox.desktop			/usr/share/xsessions/

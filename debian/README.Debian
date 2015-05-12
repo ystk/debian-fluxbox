@@ -1,0 +1,26 @@
+fluxbox for Debian
+--------------------------------
+
+Fluxbox is a window manager, that forked from ``blackbox'' after a long
+period of blackbox inactivity.
+
+Currently, fluxbox supports the debian menu system, -however-, to use
+user-menus, you need to alter the ~/.fluxbox/init file.
+
+
+For using debian-menu You should set in Your ~/.fluxbox/init the
+session.menuFile option into value:
+
+session.menuFile: ~/.fluxbox/fluxbox-menu
+	- if You want to manage the menu by starting update-menus by user
+
+session.menuFile: /etc/X11/fluxbox/fluxbox-menu
+	- if You want to see the menu that is refreshed automatically as
+	soon as programs are installed/deleted.
+
+You may also copy the file /etc/X11/fluxbox/fluxbox.menu-user
+into Your directory ~/.fluxbox  and edit it additionally.
+
+--
+Dmitry E. Oboukhov <dimka@avanto.org>
+

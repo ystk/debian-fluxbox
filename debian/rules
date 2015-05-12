@@ -1,0 +1,8 @@
+#!/usr/bin/make -f
+
+RULE_FILES=$(shell ls debian/rules.d/*.mk | sort -n)
+
+include $(RULE_FILES)
+
+%:
+	dh $@ --with autoreconf

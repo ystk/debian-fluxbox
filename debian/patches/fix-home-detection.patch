@@ -1,0 +1,148 @@
+From: Mathias Gumz <akira at fluxbox dot org>
+Date: Sat, 29 Jun 2013 08:39:02 +0200
+Subject: fix detection of $HOME folder
+Description:
+ usually $HOME is set when fluxbox runs. in some rare scenarios (eg., fuzzying
+ binaries to detect bugs) one could launch fluxbox by using 'env -i' and thus
+ eliminating $HOME from the environment. to prevent crashes fluxbox uses now
+ 'getpwuid()' when $HOME is not set to detect the home folder.
+Origin: upstream
+
+---
+ src/FbTk/StringUtil.cc         | 34 +++++++++++++++++++++++++++++-----
+ src/main.cc                    | 11 ++++-------
+ src/tests/StringUtiltest.cc    | 15 ++++++++++-----
+ util/fluxbox-update_configs.cc |  3 +--
+ 4 files changed, 44 insertions(+), 19 deletions(-)
+
+diff --git a/src/FbTk/StringUtil.cc b/src/FbTk/StringUtil.cc
+index fa809be..19bc861 100644
+--- a/src/FbTk/StringUtil.cc
++++ b/src/FbTk/StringUtil.cc
+@@ -55,6 +55,12 @@
+   #include <errno.h>
+ #endif
+ 
++#ifndef _WIN32
++#include <unistd.h>
++#include <sys/types.h>
++#include <pwd.h>
++#endif
++
+ #include <memory>
+ #include <algorithm>
+ #include <string>
+@@ -109,6 +115,28 @@ int extractUnsignedNumber(const std::string& in, T& out) {
+ }
+ 
+ 
++std::string getHomePath() {
++
++    std::string home;
++    const char* h = NULL;
++#ifdef _WIN32
++    h = getenv("USERPROFILE");
++#else
++    h = getenv("HOME");
++#endif
++    if (h) {
++        home.assign(h);
++    } else {
++#ifndef _WIN32
++        uid_t uid = geteuid();
++        struct passwd* pw = getpwuid(uid);
++        if (pw) {
++            home.assign(pw->pw_dir);
++        }
++#endif
++    }
++    return home;
++}
+ 
+ }
+ 
+@@ -240,11 +268,7 @@ string expandFilename(const string &filename) {
+     string retval;
+     size_t pos = filename.find_first_not_of(" \t");
+     if (pos != string::npos && filename[pos] == '~') {
+-#ifdef _WIN32
+-        retval = getenv("USERPROFILE");
+-#else
+-        retval = getenv("HOME");
+-#endif
++        retval = getHomePath();
+         if (pos + 1 < filename.size()) {
+             // copy from the character after '~'
+             retval += static_cast<const char *>(filename.c_str() + pos + 1);
+diff --git a/src/main.cc b/src/main.cc
+index 0639e30..435e9f4 100644
+--- a/src/main.cc
++++ b/src/main.cc
+@@ -239,13 +239,10 @@ struct Options {
+         if (env && strlen(env) > 0) {
+             session_display.assign(env);
+         }
+-#ifdef _WIN32
+-        env = getenv("USERPROFILE");
+-#else
+-        env = getenv("HOME");
+-#endif
+-        if (env && strlen(env) > 0) {
+-            rc_path.assign(std::string(env) + "/." + realProgramName("fluxbox"));
++
++        rc_path = FbTk::StringUtil::expandFilename(std::string("~/.") + realProgramName("fluxbox"));
++
++        if (!rc_path.empty()) {
+             rc_file = rc_path + "/init";
+         }
+     }
+diff --git a/src/tests/StringUtiltest.cc b/src/tests/StringUtiltest.cc
+index e5e8419..a821184 100644
+--- a/src/tests/StringUtiltest.cc
++++ b/src/tests/StringUtiltest.cc
+@@ -46,11 +46,16 @@ void testStringtok() {
+ void testExpandFilename() {
+     string filename(StringUtil::expandFilename("~/filename/~filename2/file3~/file4"));
+     cerr<<"test ";
+-    string test = string(getenv("HOME"))+"/filename/~filename2/file3~/file4";
+-    if (test == filename)
+-        cerr<<"ok.";
+-    else
+-        cerr<<"faild";
++    const char* home = getenv("HOME");
++    if (home) {
++        string test = string(home)+"/filename/~filename2/file3~/file4";
++        if (test == filename)
++            cerr<<"ok.";
++        else
++            cerr<<"failed";
++    } else {
++        cerr << "failed, can't get $HOME.";
++    }
+     cerr<<endl;
+ }
+ 
+diff --git a/util/fluxbox-update_configs.cc b/util/fluxbox-update_configs.cc
+index a8052a2..8eff8e4 100644
+--- a/util/fluxbox-update_configs.cc
++++ b/util/fluxbox-update_configs.cc
+@@ -64,7 +64,6 @@ using std::set;
+ using std::map;
+ using std::list;
+ using std::exit;
+-using std::getenv;
+ 
+ string read_file(const string& filename);
+ void write_file(const string& filename, const string &contents);
+@@ -615,7 +614,7 @@ int main(int argc, char **argv) {
+     }
+ 
+     if (rc_filename.empty())
+-        rc_filename = getenv("HOME") + string("/.fluxbox/init");
++        rc_filename = FbTk::StringUtil::expandFilename("~/.fluxbox/init");
+ 
+     FbTk::ResourceManager resource_manager(rc_filename.c_str(),false);
+     if (!resource_manager.load(rc_filename.c_str())) {
+-- 
+1.8.3.1
+

@@ -1,0 +1,33 @@
+From: Paul Tagliamonte <paultag@fluxbox.org>
+Date: Fri, 18 May 2012 19:36:19 -0400
+Subject: Debian-local change to check if fbautostart exists.
+
+ This is to better integrate the two apps, without fbautostart
+ having to restort to gross hacks to get it's self started up, or
+ give the user correct (but unexpected) behavior.
+---
+ util/startfluxbox.in |    8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/util/startfluxbox.in b/util/startfluxbox.in
+index 3c083f3..70a9698 100755
+--- a/util/startfluxbox.in
++++ b/util/startfluxbox.in
+@@ -49,6 +49,14 @@ xmodmap "$HOME/.Xmodmap"
+ # wmnd &
+ # wmsmixer -w &
+ # idesk &
++#
++# Debian-local change:
++#   - fbautostart has been added with a quick hack to check to see if it
++#     exists. If it does, we'll start it up by default.
++which fbautostart > /dev/null
++if [ \$? -eq 0 ]; then
++    fbautostart
++fi
+ 
+ # And last but not least we start fluxbox.
+ # Because it is the last app you have to run it with ''exec'' before it.
+-- 
+1.7.9.5
+

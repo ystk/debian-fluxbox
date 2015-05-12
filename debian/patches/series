@@ -1,0 +1,3 @@
+fix-xterm-keybinding.patch
+fix-startup-check-fbautostart.patch
+fix-home-detection.patch
