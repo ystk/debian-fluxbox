@@ -24,29 +24,34 @@
 #include "App.hh"
 #include "PixmapWithMask.hh"
 
-#include <X11/xpm.h>
-
 #include <Imlib2.h>
 #include <map>
 #include <iostream>
 
 namespace {
 
-typedef std::map<int, Imlib_Context> ScreenImlibContextContainer;
+class ScreenImlibContextContainer : public std::map<int, Imlib_Context> {
+public:
+    ~ScreenImlibContextContainer() {
+
+        std::map<int, Imlib_Context>::iterator it = this->begin();
+        std::map<int, Imlib_Context>::iterator it_end = this->end();
+        for (; it != it_end; ++it) {
+            imlib_context_free(it->second);
+        }
+
+        imlib_flush_loaders();
+    }
+};
 typedef ScreenImlibContextContainer::iterator ScreenImlibContext;
 
 ScreenImlibContextContainer contexts;
-
-}; // anon namespace
+} // anon namespace
 
 
 namespace FbTk {
 
 ImageImlib2::ImageImlib2() {
-
-    // lets have a 2mb cache inside imlib, holds
-    // uncompressed images
-    imlib_set_cache_size(2048 * 1024);
 
     // TODO: this are the potential candidates,
     //       choose only sane ones. open for discussion
@@ -71,16 +76,6 @@ ImageImlib2::ImageImlib2() {
     }
 }
 
-ImageImlib2::~ImageImlib2() {
-    
-    ScreenImlibContext it = contexts.begin();
-    ScreenImlibContext it_end = contexts.end();
-    for (; it != it_end; it++) {
-        imlib_context_free(it->second);
-    }
-    contexts.clear();
-}
-
 PixmapWithMask *ImageImlib2::load(const std::string &filename, int screen_num) const {
 
     Display *dpy = FbTk::App::instance()->display();
@@ -91,11 +86,15 @@ PixmapWithMask *ImageImlib2::load(const std::string &filename, int screen_num) c
 
         Imlib_Context new_context = imlib_context_new();
         imlib_context_push(new_context);
-        
+
         imlib_context_set_display(dpy);
         imlib_context_set_visual(DefaultVisual(dpy, screen_num));
         imlib_context_set_colormap(DefaultColormap(dpy, screen_num));
         imlib_context_set_drawable(RootWindow(dpy, screen_num));
+
+        // lets have a 2mb cache inside imlib, holds
+        // uncompressed images
+        imlib_set_cache_size(2048 * 1024);
 
         imlib_context_pop();
 

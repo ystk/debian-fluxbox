@@ -41,6 +41,8 @@
   #include <assert.h>
 #endif
 
+#include <limits>
+
 namespace FbTk {
 
 FbWindow::FbWindow():
@@ -75,10 +77,17 @@ FbWindow::FbWindow(int screen_num,
                    bool override_redirect,
                    bool save_unders,
                    unsigned int depth,
-                   int class_type):
+                   int class_type,
+                   Visual *visual,
+                   Colormap cmap):
     FbDrawable(),
     m_parent(0),
     m_screen_num(screen_num),
+    m_window(0),
+    m_x(0), m_y(0), m_width(1), m_height(1),
+    m_border_width(0),
+    m_border_color(0),
+    m_depth(0),
     m_destroy(true),
     m_lastbg_color_set(false),
     m_lastbg_color(0),
@@ -86,26 +95,31 @@ FbWindow::FbWindow(int screen_num,
 
     create(RootWindow(display(), screen_num),
            x, y, width, height, eventmask,
-           override_redirect, save_unders, depth, class_type);
-};
+           override_redirect, save_unders, depth, class_type, visual, cmap);
+}
 
 FbWindow::FbWindow(const FbWindow &parent,
                    int x, int y, unsigned int width, unsigned int height,
                    long eventmask,
                    bool override_redirect,
                    bool save_unders,
-                   unsigned int depth, int class_type):
+                   unsigned int depth,
+                   int class_type,
+                   Visual *visual,
+                   Colormap cmap):
+    FbDrawable(),
     m_parent(&parent),
     m_screen_num(parent.screenNumber()),
+    m_window(0),
+    m_x(0), m_y(0),
+    m_width(1), m_height(1),
     m_destroy(true),
     m_lastbg_color_set(false), m_lastbg_color(0),
     m_lastbg_pm(0), m_renderer(0) {
 
     create(parent.window(), x, y, width, height, eventmask,
-           override_redirect, save_unders, depth, class_type);
-
-
-};
+           override_redirect, save_unders, depth, class_type, visual, cmap);
+}
 
 FbWindow::FbWindow(Window client):
     FbDrawable(),
@@ -162,7 +176,7 @@ void FbWindow::invalidateBackground() {
 
 void FbWindow::updateBackground(bool only_if_alpha) {
     Pixmap newbg = m_lastbg_pm;
-    unsigned char alpha = 255;
+    int alpha = 255;
     bool free_newbg = false;
 
     if (m_lastbg_pm == None && !m_lastbg_color_set)
@@ -251,6 +265,13 @@ void FbWindow::setName(const char *name) {
     XStoreName(display(), m_window, name);
 }
 
+void FbWindow::setWindowRole(const char *windowRole) {
+    XTextProperty tp;
+    XStringListToTextProperty(const_cast<char **>(&windowRole), 1, &tp);
+    XSetTextProperty(display(), m_window, &tp, XInternAtom(display(), "WM_WINDOW_ROLE", False));
+    XFree(tp.value);
+}
+
 void FbWindow::setEventMask(long mask) {
     XSelectInput(display(), m_window, mask);
 }
@@ -335,7 +356,7 @@ void FbWindow::updateTransparent(int the_x, int the_y, unsigned int the_width, u
 #endif // HAVE_XRENDER
 }
 
-void FbWindow::setAlpha(unsigned char alpha) {
+void FbWindow::setAlpha(int alpha) {
 #ifdef HAVE_XRENDER
     if (FbTk::Transparent::haveComposite()) {
         if (m_transparent.get() != 0) {
@@ -362,7 +383,7 @@ void FbWindow::setAlpha(unsigned char alpha) {
 #endif // HAVE_XRENDER
 }
 
-unsigned char FbWindow::alpha() const {
+int FbWindow::alpha() const {
 #ifdef HAVE_XRENDER
     if (m_transparent.get())
         return m_transparent->alpha();
@@ -460,6 +481,8 @@ void FbWindow::reparent(const FbWindow &parent, int x, int y, bool continuing) {
     if (continuing) // we will continue managing this window after reparent
         updateGeometry();
 }
+
+namespace {
 struct TextPropPtr {
     TextPropPtr(XTextProperty& prop):m_prop(prop) {}
     ~TextPropPtr() {
@@ -470,29 +493,47 @@ struct TextPropPtr {
     }
     XTextProperty& m_prop;
 };
-std::string FbWindow::textProperty(Atom property) const {
+}
+
+long FbWindow::cardinalProperty(Atom prop,bool*exists) const {
+    Atom type;
+    int format;
+    unsigned long nitems, bytes_after;
+    int result;
+    long* num;
+    long ret=0;
+    if (exists) *exists=false;
+    if (property(prop, 0, 1, False, XA_CARDINAL, &type, &format, &nitems, &bytes_after, reinterpret_cast<unsigned char**>(&num))) {
+        if (type == XA_CARDINAL && nitems) {
+            ret = *num;
+            if (exists) *exists=true;
+        }
+        XFree(num);
+    }
+    return ret;
+}
+
+FbTk::FbString FbWindow::textProperty(Atom prop,bool*exists) const {
     XTextProperty text_prop;
     TextPropPtr helper(text_prop);
     char ** stringlist = 0;
     int count = 0;
-    std::string ret;
+    FbTk::FbString ret;
 
-    static Atom m_utf8string = XInternAtom(display(), "UTF8_STRING", False);
+    static const Atom utf8string = XInternAtom(display(), "UTF8_STRING", False);
 
-    if (XGetTextProperty(display(), window(), &text_prop, property) == 0) {
+    if (exists) *exists=false;
+    if (XGetTextProperty(display(), window(), &text_prop, prop) == 0 || text_prop.value == 0 || text_prop.nitems == 0) {
         return "";
     }
 
-    if (text_prop.value == 0 || text_prop.nitems == 0) {
-        return "";
-    }
 
     if (text_prop.encoding == XA_STRING) {
         if (XTextPropertyToStringList(&text_prop, &stringlist, &count) == 0 || count == 0) {
             return "";
         }
         ret = FbStringUtil::XStrToFb(stringlist[0]);
-    } else if (text_prop.encoding == m_utf8string && text_prop.format == 8) {
+    } else if (text_prop.encoding == utf8string && text_prop.format == 8) {
 #ifdef X_HAVE_UTF8_STRING
         Xutf8TextPropertyToTextList(display(), &text_prop, &stringlist, &count);
         if (count == 0 || stringlist == 0) {
@@ -517,11 +558,11 @@ std::string FbWindow::textProperty(Atom property) const {
     if (stringlist) {
         XFreeStringList(stringlist);
     }
-
+    if (exists) *exists=true;
     return ret;
 }
 
-bool FbWindow::property(Atom property,
+bool FbWindow::property(Atom prop,
                         long long_offset, long long_length,
                         bool do_delete,
                         Atom req_type,
@@ -531,7 +572,7 @@ bool FbWindow::property(Atom property,
                         unsigned long *bytes_after_return,
                         unsigned char **prop_return) const {
     if (XGetWindowProperty(display(), window(),
-                           property, long_offset, long_length, do_delete,
+                           prop, long_offset, long_length, do_delete,
                            req_type, actual_type_return,
                            actual_format_return, nitems_return,
                            bytes_after_return, prop_return) == Success)
@@ -540,19 +581,19 @@ bool FbWindow::property(Atom property,
     return false;
 }
 
-void FbWindow::changeProperty(Atom property, Atom type,
+void FbWindow::changeProperty(Atom prop, Atom type,
                               int format,
                               int mode,
                               unsigned char *data,
                               int nelements) {
 
-    XChangeProperty(display(), m_window, property, type,
+    XChangeProperty(display(), m_window, prop, type,
                     format, mode,
                     data, nelements);
 }
 
-void FbWindow::deleteProperty(Atom property) {
-    XDeleteProperty(display(), m_window, property);
+void FbWindow::deleteProperty(Atom prop) {
+    XDeleteProperty(display(), m_window, prop);
 }
 
 void FbWindow::addToSaveSet() {
@@ -575,32 +616,36 @@ long FbWindow::eventMask() const {
 
 }
 
-void FbWindow::setOpaque(unsigned char alpha) {
+void FbWindow::setOpaque(int alpha) {
 #ifdef HAVE_XRENDER
-    static Atom m_alphaatom = XInternAtom(display(), "_NET_WM_WINDOW_OPACITY", False);
+    static const Atom alphaatom = XInternAtom(display(), "_NET_WM_WINDOW_OPACITY", False);
     unsigned long opacity = alpha * 0x1010101;
-    changeProperty(m_alphaatom, XA_CARDINAL, 32, PropModeReplace, (unsigned char *) &opacity, 1l);
+    changeProperty(alphaatom, XA_CARDINAL, 32, PropModeReplace, (unsigned char *) &opacity, 1l);
 #endif // HAVE_XRENDER
 }
 
-void FbWindow::updateGeometry() {
+bool FbWindow::updateGeometry() {
     if (m_window == 0)
-        return;
+        return false;
+
+    int old_x = m_x, old_y = m_y;
+    unsigned int old_width = m_width, old_height = m_height;
 
     Window root;
     unsigned int border_width, depth;
     if (XGetGeometry(display(), m_window, &root, &m_x, &m_y,
-                     (unsigned int *)&m_width, (unsigned int *)&m_height,
-                     &border_width, &depth))
+                     &m_width, &m_height, &border_width, &depth))
         m_depth = depth;
+
+    return (old_x != m_x || old_y != m_y || old_width != m_width ||
+            old_height != m_height);
 }
 
 void FbWindow::create(Window parent, int x, int y,
                       unsigned int width, unsigned int height,
                       long eventmask, bool override_redirect,
-                      bool save_unders, unsigned int depth, int class_type) {
-
-
+                      bool save_unders, unsigned int depth, int class_type,
+                      Visual *visual, Colormap cmap) {
     m_border_width = 0;
     m_border_color = 0;
 
@@ -618,11 +663,18 @@ void FbWindow::create(Window parent, int x, int y,
         values.save_under = True;
     }
 
+    if (cmap != CopyFromParent) {
+        valmask |= CWColormap | CWBackPixel | CWBorderPixel;
+        values.colormap = cmap;
+        values.background_pixel = XWhitePixel(display(), 0);
+        values.border_pixel = XBlackPixel(display(), 0);
+    }
+
     m_window = XCreateWindow(display(), parent, x, y, width, height,
                              0, // border width
                              depth, // depth
                              class_type, // class
-                             CopyFromParent, // visual
+                             visual, // visual
                              valmask, // create mask
                              &values); // create atrribs
 
@@ -681,4 +733,4 @@ bool operator == (Window win, const FbWindow &fbwin) {
     return win == fbwin.window();
 }
 
-};
+}

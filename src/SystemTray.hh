@@ -25,6 +25,7 @@
 
 #include "FbTk/FbWindow.hh"
 #include "FbTk/EventHandler.hh"
+#include "FbTk/Signal.hh"
 
 #include "ToolTheme.hh"
 #include "ToolbarItem.hh"
@@ -39,10 +40,10 @@ class AtomHandler;
 
 namespace FbTk {
 template <class T> class ThemeProxy;
-class Observer;
 }
 
-class SystemTray: public ToolbarItem, public FbTk::EventHandler {
+class SystemTray: public ToolbarItem, public FbTk::EventHandler,
+                  private FbTk::SignalTracker {
 public:
 
     explicit SystemTray(const FbTk::FbWindow &parent,
@@ -72,7 +73,7 @@ public:
     int numClients() const { return m_clients.size(); }
     const FbTk::FbWindow &window() const { return m_window; }
 
-    void renderTheme(unsigned char alpha) { 
+    void renderTheme(int alpha) { 
         m_window.setBorderWidth(m_theme->border().width());
         m_window.setBorderColor(m_theme->border().color());
         m_window.setAlpha(alpha); 
@@ -82,10 +83,11 @@ public:
 
     void parentMoved() { m_window.parentMoved(); }
 
+    static std::string getNetSystemTrayAtom(int screen_nr);
+
     static Atom getXEmbedInfoAtom();
 
 private:
-
     void update();
 
     typedef std::list<TrayWindow *> ClientList;
@@ -109,7 +111,6 @@ private:
     // gaim/pidgin seems to barf if the selection is not an independent window.
     // I suspect it's an interacton with parent relationship and gdk window caching.
     FbTk::FbWindow m_selection_owner;
-    std::auto_ptr<FbTk::Observer> m_observer;
 };
 
 #endif // SYSTEMTRAY_HH

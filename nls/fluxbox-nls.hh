@@ -84,6 +84,8 @@ enum {
         ConfigmenuMaxIgnoreInc = 27,
         ConfigmenuMaxDisableMove = 28,
         ConfigmenuMaxDisableResize = 29,
+	ConfigmenuStrictMouseFocus = 30,
+	ConfigmenuFocusSameHead = 31,
 
 	EwmhSet = 5,
 	EwmhOutOfMemoryClientList = 1,
@@ -253,6 +255,6 @@ enum {
 
 }; // end enum
 
-}; // end namespace FBNLS
+} // end namespace FBNLS
 
 #endif // FLUXBOX_NLS_HH

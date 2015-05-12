@@ -44,10 +44,11 @@ WinButton::WinButton(FluxboxWindow &listen_to,
     m_theme(theme), m_pressed_theme(pressed),
     m_icon_pixmap(0), m_icon_mask(0),
     overrode_bg(false), overrode_pressed(false) {
-    theme.reconfigSig().attach(this);
+
+    join(theme.reconfigSig(), FbTk::MemFun(*this, &WinButton::updateAll));
 
     if (buttontype == MENUICON)
-        update(0);
+        updateAll();
 }
 
 void WinButton::exposeEvent(XExposeEvent &event) {
@@ -113,58 +114,36 @@ void WinButton::setPressedColor(const FbTk::Color &color) {
     }
 }
 
-Pixmap WinButton::getBackgroundPixmap() const {
+Pixmap WinButton::getPixmap(const FbTk::ThemeProxy<WinButtonTheme> &theme) const {
     switch(m_type) {
     case MAXIMIZE:
-        return m_theme->maximizePixmap().pixmap().drawable();
-        break;
+        return theme->maximizePixmap().pixmap().drawable();
     case MINIMIZE:
-        return m_theme->iconifyPixmap().pixmap().drawable();
-        break;
+        return theme->iconifyPixmap().pixmap().drawable();
     case STICK:
         if (m_listen_to.isStuck())
-            return m_theme->stuckPixmap().pixmap().drawable();
-        return m_theme->stickPixmap().pixmap().drawable();
-        break;
+            return theme->stuckPixmap().pixmap().drawable();
+        else
+            return theme->stickPixmap().pixmap().drawable();
     case CLOSE:
-        return m_theme->closePixmap().pixmap().drawable();
-        break;
+        return theme->closePixmap().pixmap().drawable();
     case SHADE:
         if (m_listen_to.isShaded())
-            return m_theme->unshadePixmap().pixmap().drawable();
-        return m_theme->shadePixmap().pixmap().drawable();
-        break;
+            return theme->unshadePixmap().pixmap().drawable();
+        else
+            return theme->shadePixmap().pixmap().drawable();
     case MENUICON:
         if (m_icon_pixmap.drawable())
-            return m_theme->titlePixmap().pixmap().drawable();
-        return m_theme->menuiconPixmap().pixmap().drawable();
-        break;
-    }
-    return None;
-}
-
-Pixmap WinButton::getPressedPixmap() const {
-    switch(m_type) {
-    case MAXIMIZE:
-        return m_pressed_theme->maximizePixmap().pixmap().drawable();
-    case MINIMIZE:
-        return m_pressed_theme->iconifyPixmap().pixmap().drawable();
-    case STICK:
-        return m_pressed_theme->stickPixmap().pixmap().drawable();
-    case CLOSE:
-        return m_pressed_theme->closePixmap().pixmap().drawable();
-    case SHADE:
-        if (m_listen_to.isShaded())
-            return m_pressed_theme->unshadePixmap().pixmap().drawable();
+            return theme->titlePixmap().pixmap().drawable();
         else
-            return m_pressed_theme->shadePixmap().pixmap().drawable();
-    case MENUICON:
-        if (m_icon_pixmap.drawable())
-            return m_theme->titlePixmap().pixmap().drawable();
-        else
-            return m_pressed_theme->menuiconPixmap().pixmap().drawable();
+            return theme->menuiconPixmap().pixmap().drawable();
+    case LEFT_HALF:
+        return theme->leftHalfPixmap().pixmap().drawable();
+    case RIGHT_HALF:
+        return theme->rightHalfPixmap().pixmap().drawable();
+    default:
+        return None;
     }
-    return None;
 }
 
 // clear is used to force this to clear the window (e.g. called from clear())
@@ -185,18 +164,14 @@ void WinButton::drawType() {
     // otherwise draw old style imagery
     switch (m_type) {
     case MAXIMIZE:
-        // if no pixmap was used, use old style
-        if (gc() == 0) // must have valid graphic context
-            return;
-
-        drawRectangle(gc(),
-                      2, 2, width() - 5, height() - 5);
-        drawLine(gc(),
-                 2, 3, width() - 3, 3);
+        drawRectangle(gc(), 2, 2, width() - 5, height() - 5);
+        drawLine(gc(), 2, 3, width() - 3, 3);
         break;
+
     case MINIMIZE:
         drawRectangle(gc(), 2, height() - 5, width() - 5, 2);
         break;
+
     case STICK:
         // width/4 != width/2, so we use /4*2 so that it's properly centred
         if (m_listen_to.isStuck()) {
@@ -209,6 +184,7 @@ void WinButton::drawType() {
                           width()/10*2 + oddW, height()/10*2 + oddH);
         }
         break;
+
     case CLOSE:
         drawLine(gc(),
                  2, 2,
@@ -224,15 +200,12 @@ void WinButton::drawType() {
         // XFree86 Version 4.3.0.1 (Debian 4.3.0.dfsg.1-1 20040428170728)
         // (X Protocol Version 11, Revision 0, Release 6.6)
 
-        drawLine(gc(),
-                 2, height() - 3,
-                 width() - 3, 2);
+        drawLine(gc(), 2, height() - 3, width() - 3, 2);
         break;
-    case SHADE:
 
+    case SHADE:
     {
         int size = width() - 5 - oddW;
-
         drawRectangle(gc(), 2, 2, size, 2);
 
         // draw a one-quarter triangle below the rectangle
@@ -245,6 +218,7 @@ void WinButton::drawType() {
 
         break;
     }
+
     case MENUICON:
         if (m_icon_pixmap.drawable()) {
 
@@ -267,9 +241,15 @@ void WinButton::drawType() {
             for (unsigned int y = height()/3; y <= height() - height()/3; y+=3) {
                 drawLine(gc(), width()/4, y, width() - width()/4 - oddW - 1, y);
             }
-            drawRectangle(gc(),
-                      2, 2, width() - 5, height() - 5);
+            drawRectangle(gc(), 2, 2, width() - 5, height() - 5);
         }
+        break;
+
+    case LEFT_HALF:
+        fillRectangle(gc(), 2, 2, (width() / 2) - oddW, height() - 4);
+        break;
+    case RIGHT_HALF:
+        fillRectangle(gc(), width() / 2, 2, (width() / 2) - 2 + oddW, height() - 4);
         break;
     }
 }
@@ -278,8 +258,7 @@ void WinButton::clear() {
     FbTk::Button::clear();
     drawType();
 }
-
-void WinButton::update(FbTk::Subject *subj) {
+void WinButton::updateAll() {
 
     // update the menu icon
     if (m_type == MENUICON && !m_listen_to.empty()) {
@@ -308,7 +287,7 @@ void WinButton::update(FbTk::Subject *subj) {
         setBackgroundPixmap(my_pm);
 
     // incorrect, pressed_pixmap is stateful in shade, so we'll do oneoff for now
-    if (m_type == SHADE) {
+    if (m_type == SHADE || m_type == STICK) {
         Pixmap p_pm = getPressedPixmap();
         if (p_pm != None)
             setPressedPixmap(p_pm);

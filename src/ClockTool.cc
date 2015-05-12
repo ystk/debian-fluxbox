@@ -28,12 +28,14 @@
 #include "CommandDialog.hh"
 #include "fluxbox.hh"
 
+#include "FbTk/MemFun.hh"
 #include "FbTk/SimpleCommand.hh"
 #include "FbTk/ImageControl.hh"
 #include "FbTk/TextUtils.hh"
 #include "FbTk/Menu.hh"
 #include "FbTk/MenuItem.hh"
 #include "FbTk/I18n.hh"
+#include "FbTk/FbTime.hh"
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -44,76 +46,89 @@
 #else
   #include <time.h>
 #endif
-#include <sys/time.h>
 #include <typeinfo>
+#include <cstdio>
+
+namespace {
+
+const char SWITCHES_SECONDS[] = "crsSTX+";
+const char SWITCHES_12_24H[] = "lIrkHT";
+const char SWITCHES_24_12H[] = "kHTlIr";
+const char SWITCH_AM_PM[] = "pP";
+
+/**
+ * return true if clock shows seconds. If clock doesn't show seconds then
+ * there is no need to wake up every second to redraw the clock.
+ */
+
+int showSeconds(const std::string& fmt_string) {
+
+    return FbTk::StringUtil::findCharFromAlphabetAfterTrigger(
+        fmt_string, '%', SWITCHES_SECONDS, sizeof(SWITCHES_SECONDS), 0) != std::string::npos;
+}
+
+
+uint64_t calcNextTimeout(const std::string& fmt_string) {
+
+    uint64_t now = FbTk::FbTime::system();
+    uint64_t unit = FbTk::FbTime::IN_SECONDS;
+    if (!showSeconds(fmt_string)) { // microseconds till next full minute
+        unit *= 60L;
+    } 
+
+    return FbTk::FbTime::remainingNext(now, unit);
+}
+
+
+} // end of anonymous namespace
+
 
 class ClockMenuItem: public FbTk::MenuItem {
 public:
     explicit ClockMenuItem(ClockTool &tool):
-        FbTk::MenuItem(""), m_tool(tool) {
-        // determine 12/24 hour format
-        _FB_USES_NLS;
-        if (m_tool.timeFormat().find("%k") != std::string::npos ||
-            m_tool.timeFormat().find("%H") != std::string::npos ||
-            m_tool.timeFormat().find("%T") != std::string::npos)
-            setLabel( _FB_XTEXT(Toolbar, Clock24,   "Clock: 24h",   "set Clockmode to 24h") );
-        else
-            setLabel( _FB_XTEXT(Toolbar, Clock12,   "Clock: 12h",   "set Clockmode to 12h") );
+        FbTk::MenuItem(FbTk::BiDiString("")), m_tool(tool) {
+
+        setClockModeLabel();
         setCloseOnClick(false);
     }
 
     void click(int button, int time, unsigned int mods) {
-        std::string newformat = m_tool.timeFormat();
-        size_t pos = newformat.find("%k");
-        std::string newstr;
-        bool clock24hour = true;
 
-        _FB_USES_NLS;
+        // does the current format string contain something with 24/12h?
+        size_t found;
+        size_t pos = FbTk::StringUtil::findCharFromAlphabetAfterTrigger(
+                m_tool.timeFormat(), '%', SWITCHES_24_12H, sizeof(SWITCHES_24_12H), &found);
 
-        if (pos != std::string::npos)
-            newstr = "%l";
-        else if ((pos = newformat.find("%H")) != std::string::npos)
-            newstr = "%I";
-        else if ((pos = newformat.find("%T")) != std::string::npos)
-            newstr = "%r";
+        if (pos != std::string::npos) { // if so, exchange it with 12/24h
+            std::string newformat = m_tool.timeFormat();
+            newformat[pos+1] = SWITCHES_12_24H[found];
 
-        // 12 hour
-        if (newstr.empty()) {
-            clock24hour = false;
-            if ((pos = newformat.find("%l")) != std::string::npos)
-                newstr = "%k";
-            else if ((pos = newformat.find("%I")) != std::string::npos)
-                newstr = "%H";
-            else if ((pos = newformat.find("%r")) != std::string::npos)
-                newstr = "%T";
-
-        }
-
-        if (!newstr.empty()) {
-
-            newformat.replace(pos, 2, newstr);
-            if (!clock24hour) { // erase %P/%p (AM|PM / am|pm)
-                pos = newformat.find("%p");
-                if (pos != std::string::npos)
+            if (found < 3) { // 24h? erase %P/%p (AM|PM / am|pm)
+                pos = FbTk::StringUtil::findCharFromAlphabetAfterTrigger(
+                    newformat, '%', SWITCH_AM_PM, sizeof(SWITCH_AM_PM), 0);
+                if (pos != std::string::npos) {
                     newformat.erase(pos, 2);
-                else if ((pos = newformat.find("%P")) != std::string::npos)
-                    newformat.erase(pos, 2);
+                }
             }
 
-
             m_tool.setTimeFormat(newformat);
-
-            if (m_tool.timeFormat().find("%k") != std::string::npos ||
-                m_tool.timeFormat().find("%H") != std::string::npos ||
-                m_tool.timeFormat().find("%T") != std::string::npos)
-                setLabel( _FB_XTEXT(Toolbar, Clock24,   "Clock: 24h",   "set Clockmode to 24h") );
-            else
-                setLabel( _FB_XTEXT(Toolbar, Clock12,   "Clock: 12h",   "set Clockmode to 12h") );
+            setClockModeLabel();
 
         } // else some other strange format...so we don't do anything
         FbTk::MenuItem::click(button, time, mods);
     }
 private:
+
+    void setClockModeLabel() {
+        _FB_USES_NLS;
+        if (FbTk::StringUtil::findCharFromAlphabetAfterTrigger(
+            m_tool.timeFormat(), '%', SWITCHES_24_12H, 3, 0) != std::string::npos) {
+            setLabel( _FB_XTEXT(Toolbar, Clock24,   "Clock: 24h",   "set Clockmode to 24h") );
+        } else {
+            setLabel( _FB_XTEXT(Toolbar, Clock12,   "Clock: 12h",   "set Clockmode to 12h") );
+        }
+    }
+
     ClockTool &m_tool;
 };
 
@@ -138,7 +153,7 @@ ClockTool::ClockTool(const FbTk::FbWindow &parent,
                      FbTk::ThemeProxy<ToolTheme> &theme, BScreen &screen,
                      FbTk::Menu &menu):
     ToolbarItem(ToolbarItem::FIXED),
-    m_button(parent, theme->font(), ""),
+    m_button(parent, theme->font(), FbTk::BiDiString("")),
     m_theme(theme),
     m_screen(screen),
     m_pixmap(0),
@@ -146,7 +161,7 @@ ClockTool::ClockTool(const FbTk::FbWindow &parent,
                  screen.name() + ".strftimeFormat", screen.altName() + ".StrftimeFormat"),
     m_stringconvertor(FbTk::StringConvertor::ToFbString) {
     // attach signals
-    theme.reconfigSig().attach(this);
+    m_tracker.join(theme.reconfigSig(), FbTk::MemFun(*this, &ClockTool::themeReconfigured));
 
     std::string time_locale = setlocale(LC_TIME, NULL);
     size_t pos = time_locale.find('.');
@@ -157,10 +172,8 @@ ClockTool::ClockTool(const FbTk::FbWindow &parent,
 
     _FB_USES_NLS;
 
-    // setup timer to check the clock every 0.01 second
-    // if nothing has changed, it wont update the graphics
-    m_timer.setInterval(1);
-    // m_timer.setTimeout(delay); // don't need to set timeout on interval timer
+    m_timer.setTimeout(calcNextTimeout(*m_timeformat));
+
     FbTk::RefCount<FbTk::Command<void> > update_graphic(new FbTk::SimpleCommand<ClockTool>(*this,
                                                                                     &ClockTool::updateTime));
     m_timer.setCommand(update_graphic);
@@ -177,7 +190,7 @@ ClockTool::ClockTool(const FbTk::FbWindow &parent,
     menu.insert(_FB_XTEXT(Toolbar, ClockEditFormat,   "Edit Clock Format",   "edit Clock Format") , editformat_cmd);
 
 
-    update(0);
+    themeReconfigured();
 }
 
 ClockTool::~ClockTool() {
@@ -213,17 +226,17 @@ void ClockTool::hide() {
 
 void ClockTool::setTimeFormat(const std::string &format) {
     *m_timeformat = format;
-    update(0);
+    themeReconfigured();
 }
 
-void ClockTool::update(FbTk::Subject *subj) {
+void ClockTool::themeReconfigured() {
     updateTime();
 
     // + 2 to make the entire text fit inside
     // we only replace numbers with zeros because everything else should be
     // relatively static. If we replace all text with zeros then widths of
     // proportional fonts with some strftime formats will be considerably off.
-    std::string text(m_button.text());
+    FbTk::FbString text(m_button.text().logical());
 
     int textlen = text.size();
     for (int i=0; i < textlen; ++i) {
@@ -239,7 +252,7 @@ void ClockTool::update(FbTk::Subject *subj) {
     translateSize(orientation(), new_width, new_height);
     if (new_width != m_button.width() || new_height != m_button.height()) {
         resize(new_width, new_height);
-        resizeSig().notify();
+        resizeSig().emit();
     }
 
 }
@@ -257,11 +270,10 @@ unsigned int ClockTool::height() const {
 }
 
 void ClockTool::updateTime() {
-    // update clock
-    timeval now;
-    gettimeofday(&now, 0);
-    time_t the_time = now.tv_sec;
 
+    m_timer.setTimeout(calcNextTimeout(*m_timeformat));
+
+    time_t the_time = time(NULL);
     if (the_time != -1) {
         char time_string[255];
         int time_string_len;
@@ -274,7 +286,7 @@ void ClockTool::updateTime() {
         if( time_string_len == 0)
             return;
         std::string text = m_stringconvertor.recode(time_string);
-        if (m_button.text() == text)
+        if (m_button.text().logical() == text)
             return;
 
         m_button.setText(text);
@@ -282,7 +294,7 @@ void ClockTool::updateTime() {
         unsigned int new_width = m_theme->font().textWidth(time_string, time_string_len) + 2;
         if (new_width > m_button.width()) {
             resize(new_width, m_button.height());
-            resizeSig().notify();
+            resizeSig().emit();
         }
 #else // dont have strftime so we have to set it to hour:minut
         //        sprintf(time_string, "%d:%d", );
@@ -294,7 +306,7 @@ void ClockTool::updateTime() {
 void ClockTool::updateSizing() {
     m_button.setBorderWidth(m_theme->border().width());
     // resizes if new timeformat
-    update(0);
+    themeReconfigured();
 }
 
 void ClockTool::reRender() {
@@ -312,7 +324,7 @@ void ClockTool::reRender() {
 }
 
 
-void ClockTool::renderTheme(unsigned char alpha) {
+void ClockTool::renderTheme(int alpha) {
     m_button.setAlpha(alpha);
     m_button.setJustify(m_theme->justify());
 

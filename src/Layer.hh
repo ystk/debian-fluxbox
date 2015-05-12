@@ -19,19 +19,10 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-#ifndef LAYER_HH
-#define LAYER_HH
+#ifndef RESOURCE_LAYER_HH
+#define RESOURCE_LAYER_HH
 
-#include <string>
-#include <cstdio>
-
-#ifdef HAVE_CSTRING
-  #include <cstring>
-#else
-  #include <string.h>
-#endif
-
-using std::string;
+#include "FbTk/StringUtil.hh"
 
 /** 
  * (This is not the layer->raise/lower handling stuff, @see FbTk::Layer)
@@ -39,7 +30,7 @@ using std::string;
  * we have a special resource type because we need to be able to name certain layers
  * a Resource<int> wouldn't allow this
  */
-class  Layer {
+class  ResourceLayer {
 public:
     enum {
         MENU = 0,
@@ -52,59 +43,58 @@ public:
         NUM_LAYERS = 13
     };
 
-    explicit Layer(int i) : m_num(i) {};
+    explicit ResourceLayer(int i) : m_num(i) {};
 
-    static int getNumFromString(const string &str) {
+    static int getNumFromString(const std::string &str) {
         int tempnum = 0;
-        if (sscanf(str.c_str(), "%d", &tempnum) == 1)
+        std::string v = FbTk::StringUtil::toLower(str);
+        if (FbTk::StringUtil::extractNumber(str, tempnum))
             return tempnum;
-        if (strcasecmp(str.c_str(), "Menu") == 0)
-            return ::Layer::MENU;
-        if (strcasecmp(str.c_str(), "AboveDock") == 0)
-            return ::Layer::ABOVE_DOCK;
-        if (strcasecmp(str.c_str(), "Dock") == 0)
-            return ::Layer::DOCK;
-        if (strcasecmp(str.c_str(), "Top") == 0)
-            return ::Layer::TOP;
-        if (strcasecmp(str.c_str(), "Normal") == 0)
-            return ::Layer::NORMAL;
-        if (strcasecmp(str.c_str(), "Bottom") == 0)
-            return ::Layer::BOTTOM;
-        if (strcasecmp(str.c_str(), "Desktop") == 0)
-            return ::Layer::DESKTOP;
+        if (v == "menu")
+            return ::ResourceLayer::MENU;
+        if (v == "abovedock")
+            return ::ResourceLayer::ABOVE_DOCK;
+        if (v == "dock")
+            return ::ResourceLayer::DOCK;
+        if (v == "top")
+            return ::ResourceLayer::TOP;
+        if (v == "normal")
+            return ::ResourceLayer::NORMAL;
+        if (v == "bottom")
+            return ::ResourceLayer::BOTTOM;
+        if (v == "desktop")
+            return ::ResourceLayer::DESKTOP;
         return -1;
     }
 
-    static string getString(int num) {
+    static std::string getString(int num) {
         switch (num) {
-        case ::Layer::MENU:
-            return string("Menu");
-        case ::Layer::ABOVE_DOCK:
-            return string("AboveDock");
-        case ::Layer::DOCK:
-            return string("Dock");
-        case ::Layer::TOP:
-            return string("Top");
-        case ::Layer::NORMAL:
-            return string("Normal");
-        case ::Layer::BOTTOM:
-            return string("Bottom");
-        case ::Layer::DESKTOP:
-            return string("Desktop");
+        case ::ResourceLayer::MENU:
+            return std::string("Menu");
+        case ::ResourceLayer::ABOVE_DOCK:
+            return std::string("AboveDock");
+        case ::ResourceLayer::DOCK:
+            return std::string("Dock");
+        case ::ResourceLayer::TOP:
+            return std::string("Top");
+        case ::ResourceLayer::NORMAL:
+            return std::string("Normal");
+        case ::ResourceLayer::BOTTOM:
+            return std::string("Bottom");
+        case ::ResourceLayer::DESKTOP:
+            return std::string("Desktop");
         default:
-            char tmpstr[128];
-            sprintf(tmpstr, "%d", num);
-            return string(tmpstr);
+           return FbTk::StringUtil::number2String(num);
         }
     }
 
     int getNum() const { return m_num; }
-    string getString() const { return getString(m_num); }
+    std::string getString() const { return getString(m_num); }
 
-    Layer &operator=(int num) { m_num = num; return *this; }
+    ResourceLayer &operator=(int num) { m_num = num; return *this; }
 
 private:
     int m_num;
 };
 
-#endif // LAYER_HH
+#endif // RESOURCE_LAYER_HH

@@ -21,6 +21,7 @@
 
 #include "Image.hh"
 #include "StringUtil.hh"
+#include "FileUtil.hh"
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -41,78 +42,60 @@ using std::string;
 using std::list;
 using std::set;
 
-namespace FbTk {
 
-Image::ImageMap Image::s_image_map;
-Image::StringList Image::s_search_paths;
+namespace {
 
+typedef std::map<std::string, FbTk::ImageBase *> ImageMap;
+typedef std::list<std::string> StringList;
 
-void Image::init() {
+ImageMap s_image_map;
+StringList s_search_paths;
 
-// create imagehandlers for their extensions
-#ifdef HAVE_XPM
-    new ImageXPM();
-#endif // HAVE_XPM
 #ifdef HAVE_IMLIB2
-    new ImageImlib2();
-#endif // HAVE_IMLIB2
-}
+FbTk::ImageImlib2 imlib2_loader;
+#endif
+#ifdef HAVE_XPM
+FbTk::ImageXPM xpm_loader;
+#endif
 
-void Image::shutdown() {
 
-    set<ImageBase*> handlers;
+} // end of anonymous namespace
 
-    // one imagehandler could be registered
-    // for more than one type
-    ImageMap::iterator it = s_image_map.begin();
-    ImageMap::iterator it_end = s_image_map.end();
-    for (; it != it_end; it++) {
-        if (it->second)
-            handlers.insert(it->second);
-    }
-
-    // free the unique handlers
-    set<ImageBase*>::iterator handler_it = handlers.begin();
-    set<ImageBase*>::iterator handler_it_end = handlers.end();
-    for(; handler_it != handler_it_end; handler_it++) {
-        delete (*handler_it);
-    }
-
-    s_image_map.clear();
-}
+namespace FbTk {
 
 PixmapWithMask *Image::load(const string &filename, int screen_num) {
 
 
-    if (filename == "")
-        return false;
+    if (filename.empty())
+        return NULL;
 
     // determine file ending
     string extension(StringUtil::toUpper(StringUtil::findExtension(filename)));
 
     // valid handle?
     if (s_image_map.find(extension) == s_image_map.end())
-        return false;
+        return NULL;
 
-    // load file
-    PixmapWithMask *pm = s_image_map[extension]->load(filename, screen_num);
-    // failed?, try different search paths
-    if (pm == 0 && s_search_paths.size()) {
-        // first we need to get basename of current filename
-        string base_filename = StringUtil::basename(filename);
-        string path = "";
-        // append each search path and try to load
-        StringList::iterator it = s_search_paths.begin();
-        StringList::iterator it_end = s_search_paths.end();
-        for (; it != it_end && pm == 0; ++it) {
-            // append search path and try load it
-            path = StringUtil::expandFilename(*it);
-            pm = s_image_map[extension]->load(path + "/" + base_filename, screen_num);
-        }
+    string path = locateFile(filename);
+    if (!path.empty())
+        return s_image_map[extension]->load(path, screen_num);
 
+    return 0;
+}
+
+string Image::locateFile(const string &filename) {
+    string path = StringUtil::expandFilename(filename);
+    if (FileUtil::isRegularFile(path.c_str()))
+        return path;
+    string base = StringUtil::basename(filename);
+    StringList::iterator it = s_search_paths.begin();
+    StringList::iterator it_end = s_search_paths.end();
+    for (; it != it_end; ++it) {
+        path = StringUtil::expandFilename(*it) + "/" + base;
+        if (FileUtil::isRegularFile(path.c_str()))
+            return path;
     }
-
-    return pm;
+    return "";
 }
 
 bool Image::registerType(const string &type, ImageBase &base) {

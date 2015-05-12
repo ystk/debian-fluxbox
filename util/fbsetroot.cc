@@ -54,6 +54,11 @@ using std::cerr;
 using std::endl;
 using std::string;
 
+inline int getRootDepth(const FbTk::FbWindow& w) {
+    return (w.depth() == 32 ? 24 : w.depth());
+}
+
+
 fbsetroot::fbsetroot(int argc, char **argv, char *dpy_name)
     : FbTk::App(dpy_name), m_app_name(argv[0]) {
 
@@ -67,30 +72,29 @@ fbsetroot::fbsetroot(int argc, char **argv, char *dpy_name)
     img_ctrl = new FbTk::ImageControl(screen);
 
     for (; i < argc; i++) {
-        if (! strcmp("-help", argv[i])) {
+        string arg = argv[i];
+        if (arg == "-help" || arg == "--help" || arg == "-h") {
             usage();
 
-        } else if ((! strcmp("-fg", argv[i])) ||
-                   (! strcmp("-foreground", argv[i])) ||
-                   (! strcmp("-from", argv[i]))) {
+        } else if (arg == "-fg" || arg == "-foreground" ||
+                   arg == "--foreground" || arg == "-from" || arg == "--from") {
             if ((++i) >= argc)
                 usage(1);
             fore = argv[i];
 
-        } else if ((! strcmp("-bg", argv[i])) ||
-                   (! strcmp("-background", argv[i])) ||
-                   (! strcmp("-to", argv[i]))) {
+        } else if (arg == "-bg" || arg == "-background" ||
+                   arg == "--background" || arg == "-to" || arg == "--to") {
             if ((++i) >= argc)
                 usage(1);
             back = argv[i];
 
-        } else if (! strcmp("-solid", argv[i])) {
+        } else if (arg == "-solid" || arg == "--solid") {
             if ((++i) >= argc)
                 usage(1);
             fore = argv[i];
             sol = true;
 
-        } else if (! strcmp("-mod", argv[i])) {
+        } else if (arg == "-mod" || arg == "--mod") {
             if ((++i) >= argc)
                 usage();
             mod_x = atoi(argv[i]);
@@ -103,14 +107,14 @@ fbsetroot::fbsetroot(int argc, char **argv, char *dpy_name)
                 mod_y = 1;
             mod = true;
 
-        } else if (! strcmp("-gradient", argv[i])) {
+        } else if (arg == "-gradient" || arg == "--gradient") {
             if ((++i) >= argc)
                 usage();
 
             grad = argv[i];
             grd = true;
 
-        } else if (! strcmp("-display", argv[i])) {
+        } else if (arg == "-display" || arg == "--display") {
             // -display passed through tests earlier... we just skip it now
             i++;
 
@@ -214,7 +218,7 @@ void fbsetroot::solid() {
     pixmap = new Pixmap(XCreatePixmap(display(),
                                       root.window(),
                                       root.width(), root.height(),
-                                      root.depth()));
+                                      getRootDepth(root)));
 
     XFillRectangle(display(), *pixmap, gc.gc(), 0, 0,
                    root.width(), root.height());
@@ -230,6 +234,9 @@ void fbsetroot::solid() {
  fg and bg colors.
 */
 void fbsetroot::modula(int x, int y) {
+
+    const int s = 16;
+
     char data[32];
     long pattern = 0;
 
@@ -237,13 +244,13 @@ void fbsetroot::modula(int x, int y) {
 
     FbRootWindow root(screen);
 
-    for (i = 0; i < 16; i++) {
+    for (i = 0; i < s; i++) {
         pattern <<= 1;
         if ((i % x) == 0)
             pattern |= 0x0001;
     }
 
-    for (i = 0; i < 16; i++) {
+    for (i = 0; i < s; i++) {
         if ((i %  y) == 0) {
             data[(i * 2)] = (char) 0xff;
             data[(i * 2) + 1] = (char) 0xff;
@@ -258,12 +265,12 @@ void fbsetroot::modula(int x, int y) {
 
 
     bitmap = XCreateBitmapFromData(display(),
-                                   root.window(), data, 16, 16);
+                                   root.window(), data, s, s);
 
     // bitmap used as tile, needs to have the same depth as background pixmap
     r_bitmap = XCreatePixmap(display(),
-                             root.window(), 16, 16,
-                             root.depth());
+                             root.window(), s, s,
+                             (root.depth() == 32 ? 24 : root.depth()));
 
     FbTk::Color f(fore, screen), b(back, screen);
 
@@ -279,7 +286,7 @@ void fbsetroot::modula(int x, int y) {
 
     // copying bitmap to the one going to be used as tile
     XCopyPlane(display(), bitmap, r_bitmap, gc.gc(),
-               0, 0, 16, 16, 0, 0, 1l);
+               0, 0, s, s, 0, 0, 1l);
 
     gc.setTile(r_bitmap);
     gc.setFillStyle(FillTiled);
@@ -287,7 +294,7 @@ void fbsetroot::modula(int x, int y) {
     pixmap = new Pixmap(XCreatePixmap(display(),
                                       root.window(),
                                       root.width(), root.height(),
-                                      root.depth()));
+                                      getRootDepth(root)));
 
     XFillRectangle(display(), *pixmap, gc.gc(), 0, 0,
                    root.width(), root.height());
@@ -333,7 +340,7 @@ void fbsetroot::gradient() {
     pixmap = new Pixmap(XCreatePixmap(display(),
                                       root.window(),
                                       root.width(), root.height(),
-                                      root.depth()));
+                                      getRootDepth(root)));
 
 
     XCopyArea(display(), tmp, *pixmap, gc.gc(), 0, 0,
@@ -357,7 +364,7 @@ void fbsetroot::gradient() {
 */
 void fbsetroot::usage(int exit_code) {
     _FB_USES_NLS;
-    cout << m_app_name << " 2.3 : (c) 2003-2006 Fluxbox Development Team" << endl;
+    cout << m_app_name << " 2.3 : (c) 2003-2011 Fluxbox Development Team" << endl;
     cout << m_app_name << " 2.1 : (c) 2002 Claes Nasten" << endl;
     cout << m_app_name << " 2.0 : (c) 1997-2000 Brad Hughes\n" << endl;
     cout << _FB_CONSOLETEXT(fbsetroot, Usage,
@@ -382,7 +389,7 @@ int main(int argc, char **argv) {
     FbTk::NLSInit("fluxbox.cat");
 
     for (; i < argc; i++) {
-        if (! strcmp(argv[i], "-display")) {
+        if (!strcmp(argv[i], "-display") || !strcmp(argv[i], "--display")) {
             // check for -display option
 
             if ((++i) >= argc) {
@@ -400,7 +407,7 @@ int main(int argc, char **argv) {
 
     try {
         fbsetroot app(argc, argv, display_name);
-    } catch (string error_str) {
+    } catch (string & error_str) {
         _FB_USES_NLS;
         cerr<<_FB_CONSOLETEXT(Common, Error, "Error", "Error message header")<<": "<<error_str<<endl;
     }

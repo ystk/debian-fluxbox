@@ -90,7 +90,7 @@ void WindowListCmd::execute() {
                 WindowCmd<void>::setWindow((*it)->fbwindow());
             else if (typeid(**it) == typeid(WinClient))
                 WindowCmd<void>::setClient(dynamic_cast<WinClient *>(*it));
-            if (!*m_filter || m_filter->execute())
+            if (!m_filter || m_filter->execute())
                 m_cmd->execute();
         }
         WindowCmd<void>::setClient(old);
@@ -177,8 +177,16 @@ FbTk::Command<void> *parseWindowList(const string &command,
     else if (command == "prevgroup") {
         opts |= FocusableList::LIST_GROUPS;
         return new PrevWindowCmd(opts, pat);
-    } else if (command == "arrangewindows")
-        return new ArrangeWindowsCmd(pat);
+    } else if (command == "arrangewindows") {
+        int method = ArrangeWindowsCmd::UNSPECIFIED;
+        return new ArrangeWindowsCmd(method,pat);
+    } else if (command == "arrangewindowsvertical") {
+        int method = ArrangeWindowsCmd::VERTICAL;
+        return new ArrangeWindowsCmd(method,pat);
+    } else if (command == "arrangewindowshorizontal") {
+        int method = ArrangeWindowsCmd::HORIZONTAL;
+        return new ArrangeWindowsCmd(method,pat);
+    }
     return 0;
 }
 
@@ -188,8 +196,10 @@ REGISTER_COMMAND_PARSER(nextgroup, parseWindowList, void);
 REGISTER_COMMAND_PARSER(prevwindow, parseWindowList, void);
 REGISTER_COMMAND_PARSER(prevgroup, parseWindowList, void);
 REGISTER_COMMAND_PARSER(arrangewindows, parseWindowList, void);
+REGISTER_COMMAND_PARSER(arrangewindowsvertical, parseWindowList, void);
+REGISTER_COMMAND_PARSER(arrangewindowshorizontal, parseWindowList, void);
 
-}; // end anonymous namespace
+} // end anonymous namespace
 
 void AttachCmd::execute() {
     BScreen *screen = Fluxbox::instance()->keyScreen();
@@ -318,7 +328,7 @@ REGISTER_COMMAND_PARSER(rightworkspace, parseIntCmd, void);
 REGISTER_COMMAND_PARSER(leftworkspace, parseIntCmd, void);
 REGISTER_COMMAND_PARSER(workspace, parseIntCmd, void);
 
-}; // end anonymous namespace
+} // end anonymous namespace
 
 void NextWorkspaceCmd::execute() {
     BScreen *screen = Fluxbox::instance()->mouseScreen();
@@ -383,7 +393,7 @@ void ArrangeWindowsCmd::execute() {
 
     Workspace::Windows normal_windows;
     Workspace::Windows shaded_windows;
-    for(win = space->windowList().begin(); win != space->windowList().end(); win++) {
+    for(win = space->windowList().begin(); win != space->windowList().end(); ++win) {
         int winhead = screen->getHead((*win)->fbWindow());
         if ((winhead == head || winhead == 0) && m_pat.match(**win)) {
             if ((*win)->isShaded())
@@ -404,7 +414,8 @@ void ArrangeWindowsCmd::execute() {
     // try to get the same number of rows as columns.
     unsigned int cols = int(sqrt((float)win_count));  // truncate to lower
     unsigned int rows = int(0.99 + float(win_count) / float(cols));
-    if (max_width<max_height) {    // rotate
+    if (  (m_tile_method == VERTICAL) ||  // rotate if the user has asked for it or automagically
+          ( (m_tile_method == UNSPECIFIED) && (max_width<max_height)) ) {
         std::swap(cols, rows);
     }
 
@@ -419,7 +430,7 @@ void ArrangeWindowsCmd::execute() {
     // TODO: until i resolve the shadedwindow->moveResize() issue to place
     // them in the same columns as the normal windows i just place the shaded
     // windows unchanged ontop of the current head
-    for (i = 0, win = shaded_windows.begin(); win != shaded_windows.end(); win++, i++) {
+    for (i = 0, win = shaded_windows.begin(); win != shaded_windows.end(); ++win, ++i) {
         if (i & 1)
             (*win)->move(x_offs, y_offs);
         else
@@ -438,7 +449,7 @@ void ArrangeWindowsCmd::execute() {
     // Resizes and sets windows positions in columns and rows.
     for (i = 0; i < rows; ++i) {
         x_offs = screen->maxLeft(head);
-        for (j = 0; j < cols && normal_windows.size() > 0; ++j) {
+        for (j = 0; j < cols && !normal_windows.empty(); ++j) {
 
 
             int cell_center_x = x_offs + (x_offs + cal_width) / 2;
@@ -446,7 +457,7 @@ void ArrangeWindowsCmd::execute() {
             unsigned int closest_dist = ~0;
 
             Workspace::Windows::iterator closest = normal_windows.end();
-            for (win = normal_windows.begin(); win != normal_windows.end(); win++) {
+            for (win = normal_windows.begin(); win != normal_windows.end(); ++win) {
 
                 int win_center_x = (*win)->frame().x() + ((*win)->frame().x() + (*win)->frame().width() / 2);
                 int win_center_y = (*win)->frame().y() + ((*win)->frame().y() + (*win)->frame().height() / 2);
@@ -498,7 +509,7 @@ void ShowDesktopCmd::execute() {
     for (; it != it_end; ++it) {
         if (!(*it)->fbwindow()->isIconic() && ((*it)->fbwindow()->isStuck() ||
             (*it)->fbwindow()->workspaceNumber() == space) &&
-            (*it)->fbwindow()->layerNum() < Layer::DESKTOP) {
+            (*it)->fbwindow()->layerNum() < ResourceLayer::DESKTOP) {
             (*it)->fbwindow()->iconify();
             count++;
         }
@@ -508,7 +519,7 @@ void ShowDesktopCmd::execute() {
         BScreen::Icons icon_list = screen->iconList();
         BScreen::Icons::reverse_iterator iconit = icon_list.rbegin();
         BScreen::Icons::reverse_iterator itend= icon_list.rend();
-        for(; iconit != itend; iconit++) {
+        for(; iconit != itend; ++iconit) {
             if ((*iconit)->workspaceNumber() == space || (*iconit)->isStuck())
                 (*iconit)->deiconify(false);
         }
@@ -523,19 +534,19 @@ void CloseAllWindowsCmd::execute() {
     BScreen *screen = Fluxbox::instance()->mouseScreen();
     if (screen == 0)
         return;
-  
+
+    Workspace::Windows windows;
+
     BScreen::Workspaces::iterator workspace_it = screen->getWorkspacesList().begin();
     BScreen::Workspaces::iterator workspace_it_end = screen->getWorkspacesList().end();
-       for (; workspace_it != workspace_it_end; ++workspace_it) {
-            Workspace::Windows windows((*workspace_it)->windowList());
-            std::for_each(windows.begin(),
-            windows.end(),
-            std::mem_fun(&FluxboxWindow::close));
-           }
-    BScreen::Icons::iterator icon_it = screen->iconList().begin();
-    BScreen::Icons::iterator icon_it_end = screen->iconList().end();
-	    for (; icon_it != icon_it_end; ++icon_it ) {
-	         (*icon_it)->close();
-	      }
-				   
+    for (; workspace_it != workspace_it_end; ++workspace_it) {
+        windows = (*workspace_it)->windowList();
+        std::for_each(windows.begin(), windows.end(),
+                std::mem_fun(&FluxboxWindow::close));
+    }
+
+    windows = screen->iconList();
+    std::for_each(windows.begin(),
+            windows.end(), std::mem_fun(&FluxboxWindow::close));
+
 }

@@ -20,6 +20,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
+#include <string.h>
 #include "CurrentWindowCmd.hh"
 
 #include "fluxbox.hh"
@@ -35,10 +36,33 @@
 #include "FbTk/I18n.hh"
 #include "FbTk/stringstream.hh"
 #include "FbTk/StringUtil.hh"
+#include "FbTk/Util.hh"
+#include "FbTk/RelCalcHelper.hh"
+
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif // HAVE_CONFIG_H
+
+#ifdef HAVE_CSTDLIB
+#include <cstdlib>
+#else
+#include <stdlib.h>
+#endif
 
 using FbTk::Command;
 
 namespace {
+
+void disableMaximizationIfNeeded(FluxboxWindow& win) {
+
+    if (win.isMaximized() ||
+            win.isMaximizedVert() ||
+            win.isMaximizedHorz() ||
+            win.isFullscreen()) {
+
+        win.disableMaximization();
+    }
+}
 
 FbTk::Command<void> *createCurrentWindowCmd(const std::string &command,
                                       const std::string &args, bool trusted) {
@@ -52,12 +76,8 @@ FbTk::Command<void> *createCurrentWindowCmd(const std::string &command,
         return new CurrentWindowCmd(&FluxboxWindow::maximizeHorizontal);
     else if (command == "raise")
         return new CurrentWindowCmd(&FluxboxWindow::raise);
-    else if (command == "raiselayer")
-        return new CurrentWindowCmd(&FluxboxWindow::raiseLayer);
     else if (command == "lower")
         return new CurrentWindowCmd(&FluxboxWindow::lower);
-    else if (command == "lowerlayer")
-        return new CurrentWindowCmd(&FluxboxWindow::lowerLayer);
     else if (command == "close")
         return new CurrentWindowCmd(&FluxboxWindow::close);
     else if (command == "killwindow" || command == "kill")
@@ -95,9 +115,7 @@ REGISTER_COMMAND_PARSER(maximize, createCurrentWindowCmd, void);
 REGISTER_COMMAND_PARSER(maximizevertical, createCurrentWindowCmd, void);
 REGISTER_COMMAND_PARSER(maximizehorizontal, createCurrentWindowCmd, void);
 REGISTER_COMMAND_PARSER(raise, createCurrentWindowCmd, void);
-REGISTER_COMMAND_PARSER(raiselayer, createCurrentWindowCmd, void);
 REGISTER_COMMAND_PARSER(lower, createCurrentWindowCmd, void);
-REGISTER_COMMAND_PARSER(lowerlayer, createCurrentWindowCmd, void);
 REGISTER_COMMAND_PARSER(close, createCurrentWindowCmd, void);
 REGISTER_COMMAND_PARSER(killwindow, createCurrentWindowCmd, void);
 REGISTER_COMMAND_PARSER(kill, createCurrentWindowCmd, void);
@@ -115,7 +133,7 @@ REGISTER_COMMAND_PARSER(movetabright, createCurrentWindowCmd, void);
 REGISTER_COMMAND_PARSER(detachclient, createCurrentWindowCmd, void);
 REGISTER_COMMAND_PARSER(windowmenu, createCurrentWindowCmd, void);
 
-}; // end anonymous namespace
+} // end anonymous namespace
 
 void WindowHelperCmd::execute() {
     if (WindowCmd<void>::window() || FocusControl::focusedFbWindow())
@@ -207,14 +225,86 @@ FbTk::Command<void> *parseFocusCmd(const string &command, const string &args,
 REGISTER_COMMAND_PARSER(activate, parseFocusCmd, void);
 REGISTER_COMMAND_PARSER(focus, parseFocusCmd, void);
 
-}; // end anonymous namespace
+
+class ActivateTabCmd: public WindowHelperCmd {
+public:
+    explicit ActivateTabCmd() { }
+protected:
+    void real_execute() {
+        WinClient* winclient = fbwindow().winClientOfLabelButtonWindow(
+                Fluxbox::instance()->lastEvent().xany.window);
+
+        if (winclient && winclient != &fbwindow().winClient()) {
+            fbwindow().setCurrentClient(*winclient, true);
+        }
+
+    }
+};
+
+
+REGISTER_COMMAND(activatetab, ActivateTabCmd, void);
+
+class SetXPropCmd: public WindowHelperCmd {
+public:
+    explicit SetXPropCmd(const FbTk::FbString& name, const FbTk::FbString& value) :
+        m_name(name), m_value(value) { }
+
+protected:
+    void real_execute() {
+
+        WinClient& client = fbwindow().winClient();
+        Atom prop = XInternAtom(client.display(), m_name.c_str(), False);
+
+        client.changeProperty(prop, XInternAtom(client.display(), "UTF8_STRING", False), 8,
+                PropModeReplace, (unsigned char*)m_value.c_str(), m_value.size());
+    }
+
+private:
+    FbTk::FbString m_name;
+    FbTk::FbString m_value;
+};
+
+FbTk::Command<void> *parseSetXPropCmd(const string &command, const string &args, bool trusted) {
+
+    SetXPropCmd* cmd = 0;
+
+    if (trusted) {
+
+        FbTk::FbString name = args;
+
+        FbTk::StringUtil::removeFirstWhitespace(name);
+        FbTk::StringUtil::removeTrailingWhitespace(name);
+
+        if (name.size() > 1 && name[0] != '=') {  // the smallest valid argument is 'X='
+
+            FbTk::FbString value;
+
+            size_t eq = name.find('=');
+            if (eq != name.npos && eq != name.size()) {
+
+                value.assign(name, eq + 1, name.size());
+                name.resize(eq);
+            }
+
+            cmd = new SetXPropCmd(name, value);
+
+        }
+    }
+
+    return cmd;
+}
+
+REGISTER_COMMAND_PARSER(setxprop, parseSetXPropCmd, void);
+
+
+
+} // end anonymous namespace
 
 void SetHeadCmd::real_execute() {
     int num = m_head;
     int total = fbwindow().screen().numHeads();
     if (num < 0) num += total + 1;
-    if (num < 1) num = 1;
-    if (num > total) num = total;
+    num = FbTk::Util::clamp(num, 1, total);
     fbwindow().setOnHead(num);
 }
 
@@ -222,8 +312,7 @@ void SendToWorkspaceCmd::real_execute() {
     int num = m_workspace_num;
     int total = fbwindow().screen().numberOfWorkspaces();
     if (num < 0) num += total + 1;
-    if (num < 1) num = 1;
-    if (num > total) num = total;
+    num = FbTk::Util::clamp(num, 1, total);
     fbwindow().screen().sendToWorkspace(num-1, &fbwindow(), m_take);
 }
 
@@ -244,8 +333,7 @@ void SendToNextHeadCmd::real_execute() {
 void GoToTabCmd::real_execute() {
     int num = m_tab_num;
     if (num < 0) num += fbwindow().numClients() + 1;
-    if (num < 1) num = 1;
-    if (num > fbwindow().numClients()) num = fbwindow().numClients();
+    num = FbTk::Util::clamp(num, 1, fbwindow().numClients());
 
     FluxboxWindow::ClientList::iterator it = fbwindow().clientList().begin();
 
@@ -257,25 +345,38 @@ void GoToTabCmd::real_execute() {
 REGISTER_COMMAND(startmoving, StartMovingCmd, void);
 
 void StartMovingCmd::real_execute() {
+
+    int x;
+    int y;
     const XEvent &last = Fluxbox::instance()->lastEvent();
-    if (last.type == ButtonPress) {
-        const XButtonEvent &be = last.xbutton;
-        fbwindow().startMoving(be.x_root, be.y_root);
+    switch (last.type) {
+    case ButtonPress:
+        x = last.xbutton.x_root;
+        y = last.xbutton.y_root;
+        break;
+
+    case MotionNotify:
+        x = last.xmotion.x_root;
+        y = last.xmotion.y_root;
+        break;
+
+    default:
+        return;
     }
+
+    fbwindow().startMoving(x, y);
 }
 
 FbTk::Command<void> *StartResizingCmd::parse(const string &cmd, const string &args,
                                        bool trusted) {
     FluxboxWindow::ResizeModel mode = FluxboxWindow::DEFAULTRESIZE;
+    int corner_size_px = 0;
+    int corner_size_pc = 0;
     std::vector<string> tokens;
     FbTk::StringUtil::stringtok<std::vector<string> >(tokens, args);
     if (!tokens.empty()) {
         string arg = FbTk::StringUtil::toLower(tokens[0]);
-        if (arg == "nearestcorner")
-            mode = FluxboxWindow::QUADRANTRESIZE;
-        else if (arg == "nearestedge")
-            mode = FluxboxWindow::NEARESTEDGERESIZE;
-        else if (arg == "center")
+        if (arg == "center")
             mode = FluxboxWindow::CENTERRESIZE;
         else if (arg == "topleft")
             mode = FluxboxWindow::TOPLEFTRESIZE;
@@ -293,22 +394,62 @@ FbTk::Command<void> *StartResizingCmd::parse(const string &cmd, const string &ar
             mode = FluxboxWindow::BOTTOMRESIZE;
         else if (arg == "bottomright")
             mode = FluxboxWindow::BOTTOMRIGHTRESIZE;
+        else if (arg == "nearestcorner") {
+            mode = FluxboxWindow::EDGEORCORNERRESIZE;
+            corner_size_pc = 100;
+        } else if (arg == "nearestedge") {
+            mode = FluxboxWindow::EDGEORCORNERRESIZE;
+        } else if (arg == "nearestcorneroredge") {
+            mode = FluxboxWindow::EDGEORCORNERRESIZE;
+            /* The NearestCornerOrEdge can be followed by a corner size in
+             * one of three forms:
+             *      <size in pixels>
+             *      <size in pixels> <size in percent>
+             *      <size in percent>%
+             * If no corner size is given then it defaults to 50 pixels, 30%. */
+            if (tokens.size() > 1) {
+                const char * size1 = tokens[1].c_str();
+                if (size1[strlen(size1)-1] == '%')
+                    corner_size_pc = atoi(size1);
+                else {
+                    corner_size_px = atoi(size1);
+                    if (tokens.size() > 2)
+                        corner_size_pc = atoi(tokens[2].c_str());
+                }
+            } else {
+                corner_size_px = 50;
+                corner_size_pc = 30;
+            }
+        }
     }
-    return new StartResizingCmd(mode);
+    return new StartResizingCmd(mode, corner_size_px, corner_size_pc);
 }
 
 REGISTER_COMMAND_PARSER(startresizing, StartResizingCmd::parse, void);
 
 void StartResizingCmd::real_execute() {
+
+    int x;
+    int y;
     const XEvent &last = Fluxbox::instance()->lastEvent();
-    if (last.type == ButtonPress) {
-        const XButtonEvent &be = last.xbutton;
-        int x = be.x_root - fbwindow().x()
-                - fbwindow().frame().window().borderWidth();
-        int y = be.y_root - fbwindow().y()
-                - fbwindow().frame().window().borderWidth();
-        fbwindow().startResizing(x, y, fbwindow().getResizeDirection(x, y, m_mode));
+    switch (last.type) {
+    case ButtonPress:
+        x = last.xbutton.x_root;
+        y = last.xbutton.y_root;
+        break;
+    case MotionNotify:
+        x = last.xmotion.x_root;
+        y = last.xmotion.y_root;
+        break;
+    default:
+        return;
     }
+
+    x -= fbwindow().x() - fbwindow().frame().window().borderWidth();
+    y -= fbwindow().y() - fbwindow().frame().window().borderWidth();
+
+    fbwindow().startResizing(x, y, fbwindow().getResizeDirection(
+        x, y, m_mode, m_corner_size_px, m_corner_size_pc));
 }
 
 REGISTER_COMMAND(starttabbing, StartTabbingCmd, void);
@@ -352,26 +493,70 @@ MoveCmd::MoveCmd(const int step_size_x, const int step_size_y) :
   m_step_size_x(step_size_x), m_step_size_y(step_size_y) { }
 
 void MoveCmd::real_execute() {
-  fbwindow().move(
-      fbwindow().x() + m_step_size_x,
-      fbwindow().y() + m_step_size_y);
+    if (fbwindow().isMaximized() || fbwindow().isFullscreen()) {
+        if (fbwindow().screen().getMaxDisableMove()) {
+            return;
+        }
+
+        fbwindow().setMaximizedState(WindowState::MAX_NONE);
+    }
+
+    fbwindow().move(fbwindow().x() + m_step_size_x, fbwindow().y() + m_step_size_y);
+}
+
+namespace {
+  template <typename Container>
+  static void parseToken(Container &container, int &d, bool &is_relative, bool &ignore) {
+      if (container.size() < 1)
+          return;
+
+      d = 0;
+      is_relative = false;
+      ignore = false;
+      if (container[0] == '*') {
+          ignore = true;
+      } else if (container[container.size() - 1] == '%') {
+          // its a percent
+          is_relative = true;
+          d = atoi(container.substr(0, container.size() - 1).c_str());
+      } else {
+          d = atoi(container.c_str());
+      }
+  }
 }
 
 FbTk::Command<void> *ResizeCmd::parse(const string &command, const string &args,
                                 bool trusted) {
-    FbTk_istringstream is(args.c_str());
-    int dx = 0, dy = 0;
-    is >> dx >> dy;
-    if (command == "resizehorizontal")
-        dy = 0;
-    else if (command == "resizevertical") {
-        dy = dx;
-        dx = 0;
+
+    typedef std::vector<string> StringTokens;
+    StringTokens tokens;
+    FbTk::StringUtil::stringtok<StringTokens>(tokens, args);
+
+    if (tokens.size() < 1) {
+        return 0;
     }
 
-    if (command == "resizeto")
-        return new ResizeToCmd(dx, dy);
-    return new ResizeCmd(dx, dy);
+    int dx, dy;
+    bool is_relative_x = false, is_relative_y = false, ignore_x = false, ignore_y = false;
+
+    if (command == "resizehorizontal") {
+        parseToken(tokens[0], dx, is_relative_x, ignore_x);
+        dy = 0;
+    } else if (command == "resizevertical") {
+        parseToken(tokens[0], dy, is_relative_y, ignore_y);
+        dx = 0;
+    } else {
+        if (tokens.size() < 2) {
+            return 0;
+        }
+        parseToken(tokens[0], dx, is_relative_x, ignore_x);
+        parseToken(tokens[1], dy, is_relative_y, ignore_y);
+    }
+
+    if (command == "resizeto") {
+        return new ResizeToCmd(dx, dy, is_relative_x, is_relative_y);
+    }
+    return new ResizeCmd(dx, dy, is_relative_x, is_relative_y);
 }
 
 REGISTER_COMMAND_PARSER(resize, ResizeCmd::parse, void);
@@ -379,17 +564,42 @@ REGISTER_COMMAND_PARSER(resizeto, ResizeCmd::parse, void);
 REGISTER_COMMAND_PARSER(resizehorizontal, ResizeCmd::parse, void);
 REGISTER_COMMAND_PARSER(resizevertical, ResizeCmd::parse, void);
 
-ResizeCmd::ResizeCmd(const int step_size_x, const int step_size_y) :
-    m_step_size_x(step_size_x), m_step_size_y(step_size_y) { }
+ResizeCmd::ResizeCmd(const int step_size_x, const int step_size_y, bool is_relative_x, bool is_relative_y) :
+    m_step_size_x(step_size_x), m_step_size_y(step_size_y), m_is_relative_x(is_relative_x), m_is_relative_y(is_relative_y) { }
 
 void ResizeCmd::real_execute() {
 
-    int w = std::max<int>(static_cast<int>(fbwindow().width() +
-                                      m_step_size_x * fbwindow().winClient().widthInc()),
+    if (fbwindow().isMaximized() || fbwindow().isFullscreen()) {
+        if (fbwindow().screen().getMaxDisableResize()) {
+            return;
+        }
+    }
+
+    disableMaximizationIfNeeded(fbwindow());
+
+    int dx = m_step_size_x, dy = m_step_size_y;
+    int windowWidth = fbwindow().width(), windowHeight = fbwindow().height();
+
+    unsigned int widthInc = fbwindow().winClient().widthInc(),
+        heightInc = fbwindow().winClient().heightInc();
+
+    if (m_is_relative_x) {
+        // dx = floor(windowWidth * m_step_size_x / 100 / widthInc + 0.5);
+        dx = static_cast<int>(FbTk::RelCalcHelper::calPercentageValueOf(windowWidth, m_step_size_x) / widthInc);
+    }
+
+    if (m_is_relative_y) {
+        // dy = floor(windowHeight * m_step_size_y / 100 / heightInc + 0.5);
+        dy = static_cast<int>(FbTk::RelCalcHelper::calPercentageValueOf(windowHeight, m_step_size_y) / heightInc);
+    }
+
+    int w = std::max<int>(static_cast<int>(windowWidth +
+                                      dx * widthInc),
                      fbwindow().frame().titlebarHeight() * 2 + 10);
-    int h = std::max<int>(static_cast<int>(fbwindow().height() +
-                                      m_step_size_y * fbwindow().winClient().heightInc()),
+    int h = std::max<int>(static_cast<int>(windowHeight +
+                                      dy * heightInc),
                      fbwindow().frame().titlebarHeight() + 10);
+
     fbwindow().resize(w, h);
 }
 
@@ -404,17 +614,10 @@ FbTk::Command<void> *MoveToCmd::parse(const string &cmd, const string &args,
 
     FluxboxWindow::ReferenceCorner refc = FluxboxWindow::LEFTTOP;
     int x = 0, y = 0;
-    bool ignore_x = false, ignore_y = false;
+    bool ignore_x = false, ignore_y = false, is_relative_x = false, is_relative_y = false;
 
-    if (tokens[0][0] == '*')
-        ignore_x = true;
-    else
-        x = atoi(tokens[0].c_str());
-
-    if (tokens[1][0] == '*' && !ignore_x)
-        ignore_y = true;
-    else
-        y = atoi(tokens[1].c_str());
+    parseToken(tokens[0], x, is_relative_x, ignore_x);
+    parseToken(tokens[1], y, is_relative_y, ignore_y);
 
     if (tokens.size() >= 3) {
         refc = FluxboxWindow::getCorner(tokens[2]);
@@ -422,30 +625,84 @@ FbTk::Command<void> *MoveToCmd::parse(const string &cmd, const string &args,
             refc = FluxboxWindow::LEFTTOP;
     }
 
-    return new MoveToCmd(x, y, ignore_x, ignore_y, refc);
+    return new MoveToCmd(x, y, ignore_x, ignore_y, is_relative_x, is_relative_y, refc);
 }
 
 REGISTER_COMMAND_PARSER(moveto, MoveToCmd::parse, void);
 
 void MoveToCmd::real_execute() {
-    int x = m_pos_x, y = m_pos_y;
 
-    fbwindow().translateCoords(x, y, m_corner);
-    if (m_ignore_x)
+    if (fbwindow().isMaximized() || fbwindow().isFullscreen()) {
+        if (fbwindow().screen().getMaxDisableMove()) {
+            return;
+        }
+    }
+
+    disableMaximizationIfNeeded(fbwindow());
+
+
+    int x = m_pos_x, y = m_pos_y;
+    int head = fbwindow().getOnHead();
+
+    if (m_ignore_x) {
         x = fbwindow().x();
-    if (m_ignore_y)
+    } else {
+        if (m_is_relative_x) {
+            x = fbwindow().screen().calRelativeWidth(head, x);
+        }
+        fbwindow().translateXCoords(x, m_corner);
+    }
+    if (m_ignore_y) {
         y = fbwindow().y();
+    } else {
+        if (m_is_relative_y) {
+            y = fbwindow().screen().calRelativeHeight(head, y);
+        }
+        fbwindow().translateYCoords(y, m_corner);
+    }
 
     fbwindow().move(x, y);
 }
 
 
-ResizeToCmd::ResizeToCmd(const int step_size_x, const int step_size_y) :
-    m_step_size_x(step_size_x), m_step_size_y(step_size_y) { }
+ResizeToCmd::ResizeToCmd(const int step_size_x, const int step_size_y, const bool is_relative_x, const bool is_relative_y) :
+    m_step_size_x(step_size_x), m_step_size_y(step_size_y), m_is_relative_x(is_relative_x), m_is_relative_y(is_relative_y) { }
 
 void ResizeToCmd::real_execute() {
-    if (m_step_size_x > 0 && m_step_size_y > 0)
-        fbwindow().resize(m_step_size_x, m_step_size_y);
+
+    if (fbwindow().isMaximized() || fbwindow().isFullscreen()) {
+        if (fbwindow().screen().getMaxDisableResize()) {
+            return;
+        }
+    }
+
+    disableMaximizationIfNeeded(fbwindow());
+
+    int dx = m_step_size_x, dy = m_step_size_y;
+    int head = fbwindow().getOnHead();
+
+    if (m_is_relative_x) {
+        dx = fbwindow().screen().calRelativeWidth(head, dx);
+        if(dx <= 0) {
+            dx = fbwindow().width();
+        }
+    }
+
+    if (m_is_relative_y) {
+        dy = fbwindow().screen().calRelativeHeight(head, dy);
+        if(dy <= 0) {
+            dy = fbwindow().height();
+        }
+    }
+
+    if (dx == 0) {
+      dx = fbwindow().width();
+    }
+    if (dy == 0) {
+      dy = fbwindow().height();
+    }
+
+    fbwindow().resize(dx, dy);
 }
 
 REGISTER_COMMAND(fullscreen, FullscreenCmd, void);
@@ -456,7 +713,7 @@ void FullscreenCmd::real_execute() {
 
 FbTk::Command<void> *SetLayerCmd::parse(const string &command,
                                         const string &args, bool trusted) {
-    int l = Layer::getNumFromString(args);
+    int l = ResourceLayer::getNumFromString(args);
     return (l == -1) ? 0 : new SetLayerCmd(l);
 }
 
@@ -466,15 +723,38 @@ void SetLayerCmd::real_execute() {
     fbwindow().moveToLayer(m_layer);
 }
 
+FbTk::Command<void> *ChangeLayerCmd::parse(const string &command,
+        const string &args, bool trusted) {
+    int num = 2;
+    FbTk_istringstream iss(args.c_str());
+    iss >> num;
+    if (command == "raiselayer")
+        return new ChangeLayerCmd(-num);
+    else if (command == "lowerlayer")
+        return new ChangeLayerCmd(num);
+    return 0;
+}
+
+REGISTER_COMMAND_PARSER(raiselayer, ChangeLayerCmd::parse, void);
+REGISTER_COMMAND_PARSER(lowerlayer, ChangeLayerCmd::parse, void);
+
+void ChangeLayerCmd::real_execute() {
+    fbwindow().changeLayer(m_diff);
+}
+
 namespace {
-class SetTitleDialog: public TextDialog {
+class SetTitleDialog: public TextDialog, private FbTk::SignalTracker {
 public:
     SetTitleDialog(FluxboxWindow &win, const string &title):
         TextDialog(win.screen(), title), window(win) {
+        join(win.dieSig(), FbTk::MemFunIgnoreArgs(*this, &SetTitleDialog::windowDied));
         setText(win.title());
     }
 
 private:
+    // only attached signal is window destruction
+    void windowDied() { delete this; }
+
     void exec(const std::string &text) {
         window.winClient().setTitle(text);
     }
@@ -548,23 +828,15 @@ void SetAlphaCmd::real_execute() {
         return;
     }
 
-    int new_alpha;
-    if (m_relative) {
-        new_alpha = fbwindow().getFocusedAlpha() + m_focus;
-        if (new_alpha < 0) new_alpha = 0;
-        if (new_alpha > 255) new_alpha = 255;
-        fbwindow().setFocusedAlpha(new_alpha);
-    } else
-        fbwindow().setFocusedAlpha(m_focus);
+    fbwindow().setFocusedAlpha(m_relative
+            ?  FbTk::Util::clamp(fbwindow().getFocusedAlpha() + m_focus, 0, 255)
+            : m_focus);
 
-    if (m_un_relative) {
-        new_alpha = fbwindow().getUnfocusedAlpha() + m_unfocus;
-        if (new_alpha < 0) new_alpha = 0;
-        if (new_alpha > 255) new_alpha = 255;
-        fbwindow().setUnfocusedAlpha(new_alpha);
-    } else
-        fbwindow().setUnfocusedAlpha(m_unfocus);
+    fbwindow().setUnfocusedAlpha(m_un_relative
+            ? FbTk::Util::clamp(fbwindow().getUnfocusedAlpha() + m_unfocus, 0, 255)
+            : m_unfocus);
 }
+
 
 REGISTER_COMMAND_WITH_ARGS(matches, MatchCmd, bool);
 

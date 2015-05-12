@@ -37,7 +37,8 @@
 #include "FbTk/FbWindow.hh"
 #include "FbTk/Timer.hh"
 #include "FbTk/Resource.hh"
-#include "FbTk/XLayerItem.hh"
+#include "FbTk/LayerItem.hh"
+#include "FbTk/Signal.hh"
 
 #include <X11/Xutil.h>
 
@@ -51,7 +52,8 @@ class Strut;
 class Layer;
 
 /// Handles dock apps
-class Slit: public FbTk::EventHandler, public FbTk::Observer, public LayerObject {
+class Slit: public FbTk::EventHandler, public LayerObject, private FbTk::SignalTracker
+{
 public:
     typedef std::list<SlitClient *> SlitClients;
     /**
@@ -66,7 +68,7 @@ public:
         RIGHTBOTTOM, RIGHTCENTER, RIGHTTOP
     };
 
-    Slit(BScreen &screen, FbTk::XLayer &layer, const char *filename = 0);
+    Slit(BScreen &screen, FbTk::Layer &layer, const char *filename = 0);
     virtual ~Slit();
 
     void show() { frame.window.show(); m_visible = true; }
@@ -99,8 +101,6 @@ public:
     void exposeEvent(XExposeEvent &event);
     //@}
 
-    void update(FbTk::Subject *subj);
-
     void moveToLayer(int layernum);
     void toggleHidden();
 
@@ -129,6 +129,9 @@ public:
     const SlitClients &clients() const { return m_client_list; }
     SlitClients &clients() { return m_client_list; }
 private:
+    /// Called when screen has changed
+    void screenSizeChanged(BScreen &screen);
+
     void updateAlpha();
     void clearWindow();
     void setupMenu();
@@ -171,7 +174,7 @@ private:
     // for KDE
     Atom m_kwm1_dockwindow, m_kwm2_dockwindow;
 
-    std::auto_ptr<FbTk::XLayerItem> m_layeritem;
+    std::auto_ptr<FbTk::LayerItem> m_layeritem;
     std::auto_ptr<SlitTheme> m_slit_theme;
     static unsigned int s_eventmask;
     Strut *m_strut;
@@ -179,7 +182,7 @@ private:
     FbTk::Resource<bool> m_rc_kde_dockapp, m_rc_auto_hide, m_rc_maximize_over;
     FbTk::Resource<Slit::Placement> m_rc_placement;
     FbTk::Resource<int> m_rc_alpha, m_rc_on_head;
-    FbTk::Resource<class Layer> m_rc_layernum;
+    FbTk::Resource<class ResourceLayer> m_rc_layernum;
 };
 
 

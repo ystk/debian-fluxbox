@@ -32,11 +32,11 @@ public:
     explicit XFontImp(const char *filename = 0);
     ~XFontImp();
     bool load(const std::string &filename);
-    unsigned int textWidth(const FbString &text, unsigned int size) const;
+    unsigned int textWidth(const char* text, unsigned int len) const;
     unsigned int height() const;
     int ascent() const;
     int descent() const { return m_fontstruct ? m_fontstruct->descent : 0; }
-    void drawText(const FbDrawable &w, int screen, GC gc, const FbString &text, size_t len, int x, int y, FbTk::Orientation orient);
+    void drawText(const FbDrawable &w, int screen, GC gc, const char* text, size_t len, int x, int y, FbTk::Orientation orient);
 
     bool validOrientation(FbTk::Orientation orient);
 
@@ -72,7 +72,7 @@ private:
     void rotate(FbTk::Orientation orient);
 
     void freeRotFont(XRotFontStruct * rotfont);
-    void drawRotText(Drawable w, int screen, GC gc, const FbString &text, size_t len, int x, int y, FbTk::Orientation orient) const;
+    void drawRotText(Drawable w, int screen, GC gc, const char* text, size_t len, int x, int y, FbTk::Orientation orient) const;
 
     XRotFontStruct *m_rotfonts[4]; ///< rotated font structure (only 3 used)
     bool m_rotfonts_loaded[4]; // whether we've tried yet

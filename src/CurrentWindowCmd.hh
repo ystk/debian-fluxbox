@@ -124,13 +124,16 @@ protected:
 // begin resizing with mouse
 class StartResizingCmd: public WindowHelperCmd {
 public:
-    explicit StartResizingCmd(FluxboxWindow::ResizeModel mode):m_mode(mode) { }
+    explicit StartResizingCmd(FluxboxWindow::ResizeModel mode, int corner_size_px, int corner_size_pc):
+        m_mode(mode), m_corner_size_px(corner_size_px), m_corner_size_pc(corner_size_pc) { }
     static FbTk::Command<void> *parse(const std::string &command,
                                 const std::string &args, bool trusted);
 protected:
     void real_execute();
 private:
     const FluxboxWindow::ResizeModel m_mode;
+    const int m_corner_size_px; // Corner size in pixels
+    const int m_corner_size_pc; // and in percent of half window width/height
 };
 
 // begin tabbing with mouse
@@ -158,24 +161,26 @@ private:
 // resize cmd, relative size
 class ResizeCmd: public WindowHelperCmd{
 public:
-  explicit ResizeCmd(int step_size_x, int step_size_y);
+    explicit ResizeCmd(int step_size_x, int step_size_y, bool is_relative_x, bool is_relative_y);
     static FbTk::Command<void> *parse(const std::string &command,
                                 const std::string &args, bool trusted);
 protected:
-  void real_execute();
+    void real_execute();
 
 private:
-
-  const int m_step_size_x;
-  const int m_step_size_y;
+    const int m_step_size_x;
+    const int m_step_size_y;
+    const bool m_is_relative_x;
+    const bool m_is_relative_y;
 };
 
 class MoveToCmd: public WindowHelperCmd {
 public:
-    explicit MoveToCmd(int pos_x, int pos_y, bool ignore_x, bool ignore_y,
+    explicit MoveToCmd(int pos_x, int pos_y, bool ignore_x, bool ignore_y, bool is_relative_x, bool is_relative_y,
                        FluxboxWindow::ReferenceCorner refc):
         m_pos_x(pos_x), m_pos_y(pos_y),
         m_ignore_x(ignore_x), m_ignore_y(ignore_y),
+        m_is_relative_x(is_relative_x), m_is_relative_y(is_relative_y),
         m_corner(refc) { }
 
     static FbTk::Command<void> *parse(const std::string &command,
@@ -185,19 +190,21 @@ protected:
 
 private:
     int m_pos_x, m_pos_y;
-    bool m_ignore_x, m_ignore_y;
+    bool m_ignore_x, m_ignore_y, m_is_relative_x, m_is_relative_y;
     FluxboxWindow::ReferenceCorner m_corner;
 };
 
 // resize cmd
 class ResizeToCmd: public WindowHelperCmd{
 public:
-    explicit ResizeToCmd(int step_size_x, int step_size_y);
+    explicit ResizeToCmd(int step_size_x, int step_size_y, bool is_relative_x, bool is_relative_y);
 protected:
     void real_execute();
 private:
     const int m_step_size_x;
     const int m_step_size_y;
+    const bool m_is_relative_x;
+    const bool m_is_relative_y;
 };
 
 class FullscreenCmd: public WindowHelperCmd{
@@ -253,6 +260,17 @@ protected:
     void real_execute();
 private:
     int m_layer;
+};
+
+class ChangeLayerCmd: public WindowHelperCmd {
+public:
+    explicit ChangeLayerCmd(int diff): m_diff(diff) { }
+    static FbTk::Command<void> *parse(const std::string &command,
+                                      const std::string &args, bool trusted);
+protected:
+    void real_execute();
+private:
+    int m_diff;
 };
 
 class MatchCmd: public WindowHelperBoolCmd {

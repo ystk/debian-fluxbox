@@ -30,6 +30,21 @@ namespace FbTk {
 
 namespace StringUtil {
 
+/// \@{
+/// @param in - input string, might be 0xab or 0123
+/// @param out - result if extraction was ok
+/// @return 1 - ok, result stored in 'out'
+int extractNumber(const std::string& in, unsigned int& out);
+int extractNumber(const std::string& in, int& out);
+int extractNumber(const std::string& in, long& out);
+int extractNumber(const std::string& in, long long& out);
+int extractNumber(const std::string& in, unsigned long& out);
+int extractNumber(const std::string& in, unsigned long long& out);
+/// \@}
+
+/// creates a number to a string
+std::string number2String(long long num);
+std::string number2HexString(long long num);
 
 /// Similar to `strstr' but this function ignores the case of both strings
 const char *strcasestr(const char *str, const char *ptn);
@@ -39,6 +54,18 @@ std::string expandFilename(const std::string &filename);
 
 /// @return extension of filename (ex: filename.txt will return txt)
 std::string findExtension(const std::string &filename);
+
+/// is the char after a 'trigger' part of an alphabet?
+/// @param in - string to analyze
+/// @param trigger - check for char after trigger
+/// @param alphabet - contains chars to search for
+/// @param len_alphabet - length of alphabet
+/// @param found - position of found char in alphabet (optional)
+/// @return position of trigger if found
+/// @return std::string::npos if nothing found
+std::string::size_type findCharFromAlphabetAfterTrigger(const std::string& in, 
+    char trigger,
+    const char alphabet[], size_t len_alphabet, size_t* found);
 
 /// @return copy of original with find_string replaced with "replace"
 std::string replaceString(const std::string &original, 
@@ -84,7 +111,7 @@ static void stringTokensBetween(Container &container, const std::string &in,
     while (true) {
         err = getStringBetween(token, in.c_str() + pos, first, last, ok_chars,
                                allow_nesting);
-        if (err == 0)
+        if (err <= 0)
             break;
         container.push_back(token);
         pos += err;

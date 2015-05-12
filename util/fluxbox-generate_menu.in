@@ -44,17 +44,6 @@
 #   other ways.
 
 
-WHOAMI=`whoami`
-[ "$WHOAMI" = root ] && PATH=/bin:/usr/bin:/usr/local/bin:/usr/X11R6/bin
-
-# Check for Imlib2-support
-if @pkgprefix@fluxbox@pkgsuffix@ -info 2> /dev/null | grep -q "^IMLIB"; then
-    PNG_ICONS="yes"
-else
-    # better assume to assume "no"
-    PNG_ICONS="no"
-fi
-
 # Functions
 display_usage() {
     cat << EOF
@@ -121,6 +110,39 @@ display_authors() {
     $WHOAMI:            Innocent bystander.
 
 EOF
+}
+
+testoption() {
+    if [ -z "$3" -o -n "`echo $3|grep '^-'`" ]; then
+        echo "Error: The option $2 requires an argument." >&2
+        exit 1
+    fi
+    case $1 in
+        ex) # executable
+            if find_it "$3"; then
+                :
+            else
+                echo "Error: The option $2 needs an executable as argument, and \`$3' is not." >&2
+            fi
+            ;;
+        di) # directory
+            if [ -d "$3" ]; then
+                :
+            else
+                echo "Error: The option $2 needs a directory as argument, and \`$3' is not." >&2
+            fi
+            ;;
+        fl) # file
+            if [ -r "$3" ]; then
+                :
+            else
+                echo "Error: The option $2 needs a readable file as argument, and \`$3' is not." >&2
+            fi
+            ;;
+        sk) # skip
+            :
+            ;;
+    esac
 }
 
 find_it() {
@@ -309,7 +331,7 @@ searchForIcon(){
     if [ -f "$entry_icon" ]; then
     # if icon exists and entry does not already exists, add it
         if ! grep -q -m 1 "^.${entry_exec}.[[:space:]]*<.*/${icon_base}\....>" $ICONMAPPING 2> /dev/null; then
-            echo -e "\"${entry_exec}\" \t <${entry_icon}>" >> $ICONMAPPING
+            printf "\"${entry_exec}\" \t <${entry_icon}>\n" >> $ICONMAPPING
         else 
             : echo "#    mapping already exists for ${entry_exec}" >> $ICONMAPPING
         fi
@@ -518,7 +540,7 @@ rm -f ${MENUFILENAME}.tmp
 touch ${MENUFILENAME}.tmp
 counter=10 # prevent looping in odd circumstances
 until [ $counter -lt 1 ] || \
-    cmp ${MENUFILENAME} ${MENUFILENAME}.tmp 2>&1 > /dev/null; do
+    cmp ${MENUFILENAME} ${MENUFILENAME}.tmp >/dev/null 2>&1; do
     [ -s ${MENUFILENAME}.tmp ] && mv ${MENUFILENAME}.tmp ${MENUFILENAME}
     counter=`expr $counter - 1`
     grep -v '^$' ${MENUFILENAME}|sed -e "/^\[submenu].*/{
@@ -532,6 +554,19 @@ N
 done
 rm -f ${MENUFILENAME}.tmp
 }
+# End functions
+
+
+WHOAMI=`whoami`
+[ "$WHOAMI" = root ] && PATH=/bin:/usr/bin:/usr/local/bin:/usr/X11R6/bin
+
+# Check for Imlib2-support
+if @pkgprefix@fluxbox@pkgsuffix@@EXEEXT@ -info 2> /dev/null | grep -q "^IMLIB"; then
+    PNG_ICONS="yes"
+else
+    # better assume to assume "no"
+    PNG_ICONS="no"
+fi
 
 # menu defaults (if translation forget to set one of them)
 
@@ -1217,7 +1252,7 @@ if [ ! "${INSTALL}" = Yes ]; then
 # Name of the outputfile
 # MENUFILENAME=${USERFLUXDIR}/menu
 
-# MENUTITLE=\`@pkgprefix@fluxbox@pkgsuffix@ -version|cut -d " " -f-2\`
+# MENUTITLE=\`@pkgprefix@fluxbox@pkgsuffix@@EXEEXT@ -version|cut -d " " -f-2\`
 
 # standard url for console-browsers
 # HOMEPAGE=fluxbox.org
@@ -1226,7 +1261,7 @@ if [ ! "${INSTALL}" = Yes ]; then
 # USERMENU=~/.@pkgprefix@fluxbox@pkgsuffix@/usermenu
 
 # Put the launcher you would like to use here
-# LAUNCHER=@pkgprefix@fbrun@pkgsuffix@
+# LAUNCHER=@pkgprefix@fbrun@pkgsuffix@@EXEEXT@
 # LAUNCHER=fbgm
 
 # Options for fbrun
@@ -1267,6 +1302,9 @@ if [ ! "${INSTALL}" = Yes ]; then
 # Don't cleanup the menu
 # REMOVE=no
 
+# Don't add icons to the menu
+# NO_ICON=yes
+
 EOF
             else
                 echo "Warning: I couldn't create ${MENUCONFIG}" >&2
@@ -1275,40 +1313,12 @@ EOF
     fi
 fi
 
-testoption() {
-    if [ -z "$3" -o -n "`echo $3|grep '^-'`" ]; then
-        echo "Error: The option $2 requires an argument." >&2
-        exit 1
-    fi
-    case $1 in
-        ex) # executable
-            if find_it "$3"; then
-                :
-            else
-                echo "Error: The option $2 needs an executable as argument, and \`$3' is not." >&2
-            fi
-            ;;
-        di) # directory
-            if [ -d "$3" ]; then
-                :
-            else
-                echo "Error: The option $2 needs a directory as argument, and \`$3' is not." >&2
-            fi
-            ;;
-        fl) # file
-            if [ -r "$3" ]; then
-                :
-            else
-                echo "Error: The option $2 needs a readable file as argument, and \`$3' is not." >&2
-            fi
-            ;;
-        sk) # skip
-            :
-            ;;
-    esac
-}
-
 BACKUPOPTIONS=$@
+if [ -n "$BACKUPOPTIONS" ]; then
+    FBGM_CMD="@pkgprefix@fluxbox-generate_menu@pkgsuffix@ $BACKUPOPTIONS"
+else
+    FBGM_CMD=@pkgprefix@fluxbox-generate_menu@pkgsuffix@
+fi
 # Get options.
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -1410,8 +1420,8 @@ fi
 # prefix
 PREFIX="${PREFIX:=@PREFIX@}"
 if [  -z "${PREFIX}" -o ! -d "${PREFIX}" ]; then
-    hash @pkgprefix@fluxbox@pkgsuffix@
-    PREFIX=`hash | grep @pkgprefix@fluxbox@pkgsuffix@ | sed 's,.*\t/,/,' | sed 's,/bin/@pkgprefix@fluxbox@pkgsuffix@$,,'`
+    hash @pkgprefix@fluxbox@pkgsuffix@@EXEEXT@
+    PREFIX=`hash | grep @pkgprefix@fluxbox@pkgsuffix@ | sed 's,.*\t/,/,' | sed 's,/bin/@pkgprefix@fluxbox@pkgsuffix@@EXEEXT@$,,'`
 fi
 
 
@@ -1520,10 +1530,28 @@ else
     done
 fi
 DEFAULT_BROWSERNAME=`echo $DEFAULT_BROWSER|awk '{print $1}'`
-DEFAULT_BROWSERNAME=`basename $DEFAULT_BROWSERNAME`
+if [ "x$DEFAULT_BROWSERNAME" != "x" ]; then
+	DEFAULT_BROWSERNAME=`basename $DEFAULT_BROWSERNAME`
+else
+	DEFAULT_BROWSERNAME="firefox"
+fi
 
 if [ -z "$LAUNCHER" ]; then
-    LAUNCHER=@pkgprefix@fbrun@pkgsuffix@
+    LAUNCHER=@pkgprefix@fbrun@pkgsuffix@@EXEEXT@
+fi
+if [ -n "$FBRUNOPTIONS" ]; then
+    # with this, LAUNCHER should be renamed LAUNCHER_NAME, but then there's
+    # backwards-compatibility...
+    LAUNCHER_CMD="$LAUNCHER $FBRUNOPTIONS"
+else
+    LAUNCHER_CMD=$LAUNCHER
+fi
+
+# if gxmessage exists, use it; else use xmessage
+if find_it gxmessage; then
+    XMESSAGE=gxmessage
+else
+    XMESSAGE=xmessage
 fi
 
 # Start of menu
@@ -1565,7 +1593,7 @@ case "$DEFAULT_BROWSERNAME" in
     *) append "[exec] ($DEFAULT_BROWSERNAME) {$DEFAULT_BROWSER}" ;;
 esac
 
-find_it "${LAUNCHER}" append "[exec]   (${RUNCOMMAND}) {${LAUNCHER} $FBRUNOPTIONS}"
+find_it "${LAUNCHER}" append "[exec]   (${RUNCOMMAND}) {$LAUNCHER_CMD}"
 
 
 append_submenu "${TERMINALMENU}"
@@ -1671,13 +1699,15 @@ append_submenu "${MULTIMEDIAMENU}"
        append_submenu "${MUSICMENU}"
                normal_find xmms noatun alsaplayer gqmpeg aumix xmixer gnome-alsamixer gmix kmix kscd \
                    grecord kmidi xplaycd soundtracker grip easytag audacity \
-                   zinf rhythmbox kaboodle beep-media-player amarok tagtool
+                   zinf rhythmbox kaboodle beep-media-player amarok tagtool \
+                   audacious bmpx
                cli_find cdcd cplay alsamixer orpheus mp3blaster
        append_menu_end
 
 
        append_submenu "${VIDEOMENU}"
-           normal_find xine aviplay gtv gmplayer xmovie xcdroast xgdb realplay xawtv fxtv ogle goggles vlc
+           normal_find xine gxine aviplay gtv gmplayer xmovie xcdroast xgdb \
+               realplay xawtv fxtv ogle goggles vlc
            find_it dvdrip append "[exec] (dvdrip) {nohup dvdrip}"
        append_menu_end
 
@@ -1845,17 +1875,14 @@ append_submenu "${FBSETTINGSMENU}"
     append_submenu "${TOOLS}"
         normal_find fluxconf fluxkeys fluxmenu
         find_it fbpanel append "[exec] (Fluxbox panel) {fbpanel}"
-        # if gxmessage exists, use it; else use xmessage
-        find_it gxmessage append \
-            "[exec] (${WINDOWNAME}) {xprop WM_CLASS|cut -d \\\" -f 2|gxmessage -file - -center}" || \
-            find_it xmessage append \
-            "[exec] (${WINDOWNAME}) {xprop WM_CLASS|cut -d \\\" -f 2|xmessage -file - -center}"
+        find_it $XMESSAGE append \
+            "[exec] (${WINDOWNAME}) {xprop WM_CLASS|cut -d \\\" -f 2|$XMESSAGE -file - -center}"
         find_it import append "[exec] (${SCREENSHOT} - JPG) {import screenshot.jpg && display -resize 50% screenshot.jpg}"
         find_it import append "[exec] (${SCREENSHOT} - PNG) {import screenshot.png && display -resize 50% screenshot.png}"
-        find_it ${LAUNCHER} append "[exec] (${RUNCOMMAND}) {${LAUNCHER} $FBRUNOPTIONS}"
+        find_it ${LAUNCHER} append "[exec] (${RUNCOMMAND}) {$LAUNCHER_CMD}"
         find_it switch append "[exec] (gtk-theme-switch) {switch}"
         find_it switch2 append "[exec] (gtk2-theme-switch) {switch2}"
-        find_it @pkgprefix@fluxbox-generate_menu@pkgsuffix@ append "[exec] (${REGENERATEMENU}) {@pkgprefix@fluxbox-generate_menu@pkgsuffix@ ${BACKUPOPTIONS}}"
+        find_it @pkgprefix@fluxbox-generate_menu@pkgsuffix@ append "[exec] (${REGENERATEMENU}) {$FBGM_CMD}"
     append_menu_end
 
     append_submenu "${WINDOWMANAGERS}"
@@ -1875,7 +1902,7 @@ append_submenu "${FBSETTINGSMENU}"
     append "[commanddialog] (${FLUXBOXCOMMAND})"
     append "[reconfig] (${RELOADITEM})"
     append "[restart] (${RESTARTITEM})"
-    append "[exec] (${ABOUTITEM}) {(@pkgprefix@fluxbox@pkgsuffix@ -v; @pkgprefix@fluxbox@pkgsuffix@ -info | sed 1d) | xmessage -file - -center}"
+    append "[exec] (${ABOUTITEM}) {(@pkgprefix@fluxbox@pkgsuffix@@EXEEXT@ -v; @pkgprefix@fluxbox@pkgsuffix@@EXEEXT@ -info | sed 1d) | $XMESSAGE -file - -center}"
     append "[separator]"
     append "[exit] (${EXITITEM})"
 
@@ -1896,8 +1923,8 @@ fi
 
 # escapes any parentheses in menu label
 # e.g.,  "[exec] (konqueror (web))" becomes  "[exec] (konqueror (web\))"
-sed 's/(\(.*\)(\(.*\)))/(\1 (\2\\))/' $MENUFILENAME > menu.tmp
-mv -f menu.tmp $MENUFILENAME
+sed 's/(\(.*\)(\(.*\)))/(\1 (\2\\))/' $MENUFILENAME > $MENUFILENAME.tmp
+mv -f $MENUFILENAME.tmp $MENUFILENAME
 
 if [ -z "$INSTALL" ]; then
     if [ -z "$CHECKINIT" ]; then

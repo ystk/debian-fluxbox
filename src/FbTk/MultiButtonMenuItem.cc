@@ -26,14 +26,14 @@
 
 namespace FbTk {
 
-MultiButtonMenuItem::MultiButtonMenuItem(int buttons, const FbString &label):
+MultiButtonMenuItem::MultiButtonMenuItem(int buttons, const FbTk::BiDiString &label):
     MenuItem(label),
     m_button_exe(0),
     m_buttons(buttons) {
     init(buttons);
 }
 
-MultiButtonMenuItem::MultiButtonMenuItem(int buttons, const FbString &label, Menu *submenu):
+MultiButtonMenuItem::MultiButtonMenuItem(int buttons, const FbTk::BiDiString &label, Menu *submenu):
     MenuItem(label, submenu),
     m_button_exe(0),
     m_buttons(buttons) {
@@ -41,8 +41,7 @@ MultiButtonMenuItem::MultiButtonMenuItem(int buttons, const FbString &label, Men
 }
 
 MultiButtonMenuItem::~MultiButtonMenuItem() {
-    if (m_button_exe != 0)
-        delete [] m_button_exe;
+    delete [] m_button_exe;
 }
 
 void MultiButtonMenuItem::setCommand(int button, FbTk::RefCount<FbTk::Command<void> > &cmd) {
@@ -55,7 +54,7 @@ void MultiButtonMenuItem::click(int button, int time, unsigned int mods) {
     if (button <= 0 || button > static_cast<signed>(buttons()) || buttons() == 0)
         return;
 
-    if (*m_button_exe[button - 1] != 0)
+    if (m_button_exe[button - 1] != 0)
         m_button_exe[button - 1]->execute();
 }
 

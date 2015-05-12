@@ -26,8 +26,8 @@
 #include "FocusControl.hh"
 #include "Screen.hh"
 #include "FbAtoms.hh"
-
 #include "Xutil.hh"
+#include "Debug.hh"
 
 #include "FbTk/EventManager.hh"
 #include "FbTk/MultLayers.hh"
@@ -52,13 +52,29 @@
 using std::string;
 using std::list;
 using std::mem_fun;
-
-#ifdef DEBUG
-using std::cerr;
 using std::endl;
+using std::cerr;
 using std::hex;
 using std::dec;
-#endif // DEBUG
+
+namespace {
+
+void sendMessage(const WinClient& win, Atom atom, Time time) {
+    XEvent ce;
+    ce.xclient.type = ClientMessage;
+    ce.xclient.message_type = FbAtoms::instance()->getWMProtocolsAtom();
+    ce.xclient.display = win.display();
+    ce.xclient.window = win.window();
+    ce.xclient.format = 32;
+    ce.xclient.data.l[0] = atom;
+    ce.xclient.data.l[1] = time;
+    ce.xclient.data.l[2] = 0l;
+    ce.xclient.data.l[3] = 0l;
+    ce.xclient.data.l[4] = 0l;
+    XSendEvent(win.display(), win.window(), false, NoEventMask, &ce);
+}
+
+} // end of anonymous namespace
 
 WinClient::TransientWaitMap WinClient::s_transient_wait;
 
@@ -110,11 +126,12 @@ WinClient::WinClient(Window win, BScreen &screen, FluxboxWindow *fbwin):
 }
 
 WinClient::~WinClient() {
-#ifdef DEBUG
-    cerr<<__FILE__<<"(~"<<__FUNCTION__<<")[this="<<this<<"]"<<endl;
-#endif // DEBUG
+    fbdbg<<__FILE__<<"(~"<<__FUNCTION__<<")[this="<<this<<"]"<<endl;
 
     FbTk::EventManager::instance()->remove(window());
+    Fluxbox *fluxbox = Fluxbox::instance();
+    if (window())
+        fluxbox->removeWindowSearch(window());
 
     clearStrut();
 
@@ -138,15 +155,13 @@ WinClient::~WinClient() {
         fbwindow()->removeClient(*this);
 
     // this takes care of any focus issues
-    m_diesig.notify();
+    dieSig().emit(*this);
 
     // This fixes issue 1 (see WinClient.hh):
     // If transients die before the transient_for is created
     transient_for = 0;
     removeTransientFromWaitingList();
     s_transient_wait.erase(window());
-
-    Fluxbox *fluxbox = Fluxbox::instance();
 
     if (window_group != 0) {
         fluxbox->removeGroupSearch(window_group);
@@ -156,8 +171,6 @@ WinClient::~WinClient() {
     if (m_mwm_hint != 0)
         XFree(m_mwm_hint);
 
-    if (window())
-        fluxbox->removeWindowSearch(window());
 }
 
 bool WinClient::acceptsFocus() const {
@@ -175,25 +188,12 @@ bool WinClient::sendFocus() {
     }
     if (!send_focus_message)
         return false;
-#ifdef DEBUG
-    cerr<<"WinClient::"<<__FUNCTION__<<": this = "<<this<<
+
+    fbdbg<<"WinClient::"<<__FUNCTION__<<": this = "<<this<<
         " window = 0x"<<hex<<window()<<dec<<endl;
-#endif // DEBUG
 
     // setup focus msg
-    XEvent ce;
-    ce.xclient.type = ClientMessage;
-    ce.xclient.message_type = FbAtoms::instance()->getWMProtocolsAtom();
-    ce.xclient.display = display();
-    ce.xclient.window = window();
-    ce.xclient.format = 32;
-    ce.xclient.data.l[0] = FbAtoms::instance()->getWMTakeFocusAtom();
-    ce.xclient.data.l[1] = Fluxbox::instance()->getLastTime();
-    ce.xclient.data.l[2] = 0l;
-    ce.xclient.data.l[3] = 0l;
-    ce.xclient.data.l[4] = 0l;
-    // send focus msg
-    XSendEvent(display(), window(), false, NoEventMask, &ce);
+    sendMessage(*this, FbAtoms::instance()->getWMTakeFocusAtom(), Fluxbox::instance()->getLastTime());
     FocusControl::setExpectingFocus(this);
     return true;
 }
@@ -203,20 +203,7 @@ void WinClient::sendClose(bool forceful) {
         XKillClient(display(), window());
     else {
         // send WM_DELETE message
-        // fill in XClientMessage structure for delete message
-        XEvent ce;
-        ce.xclient.type = ClientMessage;
-        ce.xclient.message_type = FbAtoms::instance()->getWMProtocolsAtom();
-        ce.xclient.display = display();
-        ce.xclient.window = window();
-        ce.xclient.format = 32;
-        ce.xclient.data.l[0] = FbAtoms::instance()->getWMDeleteAtom();
-        ce.xclient.data.l[1] = CurrentTime;
-        ce.xclient.data.l[2] = 0l;
-        ce.xclient.data.l[3] = 0l;
-        ce.xclient.data.l[4] = 0l;
-        // send event delete message to client window
-        XSendEvent(display(), window(), false, NoEventMask, &ce);
+        sendMessage(*this, FbAtoms::instance()->getWMDeleteAtom(), CurrentTime);
     }
 }
 
@@ -239,28 +226,9 @@ string WinClient::getWMRole() const {
 }
 
 void WinClient::updateWMClassHint() {
-    XClassHint ch;
-    if (XGetClassHint(display(), window(), &ch) == 0) {
-#ifdef DEBUG
-        cerr<<"WinClient: Failed to read class hint!"<<endl;
-#endif //DEBUG
-        m_instance_name = m_class_name = "";
-    } else {
 
-        if (ch.res_name != 0) {
-            m_instance_name = const_cast<char *>(ch.res_name);
-            XFree(ch.res_name);
-            ch.res_name = 0;
-        } else
-            m_instance_name = "";
-
-        if (ch.res_class != 0) {
-            m_class_name = const_cast<char *>(ch.res_class);
-            XFree(ch.res_class);
-            ch.res_class = 0;
-        } else
-            m_class_name = "";
-    }
+    m_instance_name = Xutil::getWMClassName(window());
+    m_class_name = Xutil::getWMClassClass(window());
 }
 
 void WinClient::updateTransientInfo() {
@@ -275,17 +243,14 @@ void WinClient::updateTransientInfo() {
     // determine if this is a transient window
     Window win = 0;
     if (!XGetTransientForHint(display(), window(), &win)) {
-#ifdef DEBUG
-        cerr<<__FUNCTION__<<": window() = 0x"<<hex<<window()<<dec<<"Failed to read transient for hint."<<endl;
-#endif // DEBUG
+
+        fbdbg<<__FUNCTION__<<": window() = 0x"<<hex<<window()<<dec<<"Failed to read transient for hint."<<endl;
         return;
     }
 
     // we can't be transient to ourself
     if (win == window()) {
-#ifdef DEBUG
         cerr<<__FUNCTION__<<": transient to ourself"<<endl;
-#endif // DEBUG
         return;
     }
 
@@ -314,10 +279,9 @@ void WinClient::updateTransientInfo() {
     }
 
 
-#ifdef DEBUG
-    cerr<<__FUNCTION__<<": transient_for window = 0x"<<hex<<win<<dec<<endl;
-    cerr<<__FUNCTION__<<": transient_for = "<<transient_for<<endl;
-#endif // DEBUG
+    fbdbg<<__FUNCTION__<<": transient_for window = 0x"<<hex<<win<<dec<<endl;
+    fbdbg<<__FUNCTION__<<": transient_for = "<<transient_for<<endl;
+
     // make sure we don't have deadlock loop in transient chain
     for (WinClient *w = this; w != 0; w = w->transient_for) {
         if (this == w->transient_for)
@@ -349,14 +313,14 @@ void WinClient::updateTitle() {
     if (m_title_override)
         return;
 
-    m_title = string(Xutil::getWMName(window()), 0, 512);
-    titleSig().notify();
+    m_title.setLogical(FbTk::FbString(Xutil::getWMName(window()), 0, 512));
+    titleSig().emit(m_title.logical(), *this);
 }
 
 void WinClient::setTitle(const FbTk::FbString &title) {
-    m_title = title;
+    m_title.setLogical(title);
     m_title_override = true;
-    titleSig().notify();
+    titleSig().emit(m_title.logical(), *this);
 }
 
 void WinClient::setIcon(const FbTk::PixmapWithMask& pm) {
@@ -364,7 +328,7 @@ void WinClient::setIcon(const FbTk::PixmapWithMask& pm) {
     m_icon.pixmap().copy(pm.pixmap());
     m_icon.mask().copy(pm.mask());
     m_icon_override = true;
-    titleSig().notify();
+    titleSig().emit(m_title.logical(), *this);
 }
 
 void WinClient::setFluxboxWindow(FluxboxWindow *win) {
@@ -442,8 +406,7 @@ void WinClient::updateWMHints() {
             if (wmhint->flags & XUrgencyHint) {
                 Fluxbox::instance()->attentionHandler().addAttention(*this);
             } else {
-                Fluxbox::instance()->attentionHandler().
-                    update(&m_focussig);
+                Fluxbox::instance()->attentionHandler().windowFocusChanged(*this);
             }
         }
 
@@ -466,7 +429,7 @@ Window WinClient::getGroupLeftWindow() const {
     int format;
     Atom atom_return;
     unsigned long num = 0, len = 0;
-    Atom group_left_hint = XInternAtom(display(), "_FLUXBOX_GROUP_LEFT", False);
+    static Atom group_left_hint = XInternAtom(display(), "_FLUXBOX_GROUP_LEFT", False);
 
     Window *data = 0;
     if (property(group_left_hint, 0,
@@ -491,7 +454,7 @@ Window WinClient::getGroupLeftWindow() const {
 void WinClient::setGroupLeftWindow(Window win) {
     if (m_screen.isShuttingdown())
         return;
-    Atom group_left_hint = XInternAtom(display(), "_FLUXBOX_GROUP_LEFT", False);
+    static Atom group_left_hint = XInternAtom(display(), "_FLUXBOX_GROUP_LEFT", False);
     changeProperty(group_left_hint, XA_WINDOW, 32,
                    PropModeReplace, (unsigned char *) &win, 1);
 }
@@ -502,7 +465,7 @@ bool WinClient::hasGroupLeftWindow() const {
     int format;
     Atom atom_return;
     unsigned long num = 0, len = 0;
-    Atom group_left_hint = XInternAtom(display(), "_FLUXBOX_GROUP_LEFT", False);
+    static Atom group_left_hint = XInternAtom(display(), "_FLUXBOX_GROUP_LEFT", False);
 
     Window *data = 0;
     if (property(group_left_hint, 0,
@@ -604,10 +567,9 @@ void WinClient::updateWMProtocols() {
         XFree(proto);
         if (fbwindow())
             fbwindow()->updateFunctions();
-#ifdef DEBUG
+
     } else {
-        cerr<<"Warning: Failed to read WM Protocols. "<<endl;
-#endif // DEBUG
+        fbdbg<<"Warning: Failed to read WM Protocols. "<<endl;
     }
 
 }

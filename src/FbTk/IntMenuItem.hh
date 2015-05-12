@@ -23,10 +23,11 @@
 #define FBTK_INTMENUITEM_HH
 
 #include "MenuItem.hh"
+#include "StringUtil.hh"
 
 namespace FbTk {
 
-class Accessor<class T>;
+template <typename T> class Accessor;
 
 /// Changes an resource integer value between min and max
 class IntMenuItem: public FbTk::MenuItem {
@@ -37,15 +38,6 @@ public:
         m_max(max_val), m_min(min_val), m_res(res) {
         updateLabel();
         setCloseOnClick(false);
-    }
-
-    /* Utility, but doesn't get found in anonymous namespace? */
-    std::string appendIntValue(const std::string &label, int value) {
-        char *buff = new char[label.size() + 16];
-        sprintf(buff, "%s:  %d", label.c_str(), value);
-        std::string ret(buff);
-        delete [] buff;
-        return ret;
     }
 
     void click(int button, int time, unsigned int mods) {
@@ -86,11 +78,11 @@ public:
     }
 
     void updateLabel() {
-        setLabel(appendIntValue(m_org_label, m_res));
+        setLabel(m_org_label.logical() + ":  " + FbTk::StringUtil::number2String(m_res));
     }
 
 private:
-    std::string m_org_label; ///< original label
+    FbTk::BiDiString m_org_label; ///< original label
     const int m_max; ///< maximum value the integer can have
     const int m_min; ///< minimum value the integer can have
     Accessor<int> &m_res; ///< resource item to be changed

@@ -33,6 +33,7 @@
 #include "fluxbox.hh"
 #include "Keys.hh"
 #include "Screen.hh"
+#include "ScreenPlacement.hh"
 #include "WindowCmd.hh"
 
 #include "Strut.hh"
@@ -50,7 +51,9 @@
 #include "FbTk/BoolMenuItem.hh"
 #include "FbTk/IntMenuItem.hh"
 #include "FbTk/Shape.hh"
-#include "FbTk/SimpleObserver.hh"
+#include "FbTk/MemFun.hh"
+#include "FbTk/STLUtil.hh"
+#include "FbTk/Util.hh"
 
 // use GNU extensions
 #ifndef	 _GNU_SOURCE
@@ -71,88 +74,64 @@
 #endif
 #include <iterator>
 #include <typeinfo>
+#include <functional>
+#include <algorithm>
 
 using std::string;
 using std::pair;
 using std::list;
 
-namespace FbTk {
+using FbTk::STLUtil::forAll;
 
-template<>
-void FbTk::Resource<Toolbar::Placement>::
-setFromString(const char *strval) {
-    if (strcasecmp(strval, "TopLeft")==0)
-        m_value = Toolbar::TOPLEFT;
-    else if (strcasecmp(strval, "BottomLeft")==0)
-        m_value = Toolbar::BOTTOMLEFT;
-    else if (strcasecmp(strval, "TopCenter")==0)
-        m_value = Toolbar::TOPCENTER;
-    else if (strcasecmp(strval, "BottomCenter")==0)
-        m_value = Toolbar::BOTTOMCENTER;
-    else if (strcasecmp(strval, "TopRight")==0)
-        m_value = Toolbar::TOPRIGHT;
-    else if (strcasecmp(strval, "BottomRight")==0)
-        m_value = Toolbar::BOTTOMRIGHT;
-    else if (strcasecmp(strval, "LeftTop") == 0)
-        m_value = Toolbar::LEFTTOP;
-    else if (strcasecmp(strval, "LeftCenter") == 0)
-        m_value = Toolbar::LEFTCENTER;
-    else if (strcasecmp(strval, "LeftBottom") == 0)
-        m_value = Toolbar::LEFTBOTTOM;
-    else if (strcasecmp(strval, "RightTop") == 0)
-        m_value = Toolbar::RIGHTTOP;
-    else if (strcasecmp(strval, "RightCenter") == 0)
-        m_value = Toolbar::RIGHTCENTER;
-    else if (strcasecmp(strval, "RightBottom") == 0)
-        m_value = Toolbar::RIGHTBOTTOM;
-    else
-        setDefaultValue();
+namespace {
+
+struct ToolbarPlacementString {
+    Toolbar::Placement placement;
+    const char* str;
+};
+
+const ToolbarPlacementString placement_strings[] = {
+    { Toolbar::TOPLEFT, "TopLeft" },
+    { Toolbar::TOPCENTER, "TopCenter" },
+    { Toolbar::TOPRIGHT, "TopRight" },
+    { Toolbar::BOTTOMLEFT, "BottomLeft" },
+    { Toolbar::BOTTOMCENTER, "BottomCenter" },
+    { Toolbar::BOTTOMRIGHT, "BottomRight" },
+    { Toolbar::LEFTBOTTOM, "LeftBottom" },
+    { Toolbar::LEFTCENTER, "LeftCenter" },
+    { Toolbar::LEFTTOP, "LeftTop" },
+    { Toolbar::RIGHTBOTTOM, "RightBottom" },
+    { Toolbar::RIGHTCENTER, "RightCenter" },
+    { Toolbar::RIGHTTOP, "RightTop" }
+};
+
 }
+
+namespace FbTk {
 
 template<>
 string FbTk::Resource<Toolbar::Placement>::
 getString() const {
-    switch (m_value) {
-    case Toolbar::TOPLEFT:
-        return string("TopLeft");
-        break;
-    case Toolbar::BOTTOMLEFT:
-        return string("BottomLeft");
-        break;
-    case Toolbar::TOPCENTER:
-        return string("TopCenter");
-        break;
-    case Toolbar::BOTTOMCENTER:
-        return string("BottomCenter");
-        break;
-    case Toolbar::TOPRIGHT:
-        return string("TopRight");
-        break;
-    case Toolbar::BOTTOMRIGHT:
-        return string("BottomRight");
-        break;
-    case Toolbar::LEFTTOP:
-        return string("LeftTop");
-        break;
-    case Toolbar::LEFTCENTER:
-        return string("LeftCenter");
-        break;
-    case Toolbar::LEFTBOTTOM:
-        return string("LeftBottom");
-        break;
-    case Toolbar::RIGHTTOP:
-        return string("RightTop");
-        break;
-    case Toolbar::RIGHTCENTER:
-        return string("RightCenter");
-        break;
-    case Toolbar::RIGHTBOTTOM:
-        return string("RightBottom");
-        break;
-    }
-    //default string
-    return string("BottomCenter");
+
+    size_t i = (m_value == FbTk::Util::clamp(m_value, Toolbar::TOPLEFT, Toolbar::RIGHTTOP)
+                ? m_value
+                : Toolbar::DEFAULT) - Toolbar::TOPLEFT;
+    return placement_strings[i].str;
 }
+
+template<>
+void FbTk::Resource<Toolbar::Placement>::
+setFromString(const char *strval) {
+    size_t i;
+    for (i = 0; i < sizeof(placement_strings)/sizeof(ToolbarPlacementString); ++i) {
+        if (strcasecmp(strval, placement_strings[i].str) == 0) {
+            m_value = placement_strings[i].placement;
+            return;
+        }
+    }
+    setDefaultValue();
+}
+
 } // end namespace FbTk
 
 namespace {
@@ -176,7 +155,7 @@ private:
     Toolbar::Placement m_place;
 };
 
-}; // end anonymous
+} // end anonymous
 
 // toolbar frame
 Toolbar::Frame::Frame(FbTk::EventHandler &evh, int screen_num):
@@ -191,18 +170,16 @@ Toolbar::Frame::Frame(FbTk::EventHandler &evh, int screen_num):
 {
 
     FbTk::EventManager &evm = *FbTk::EventManager::instance();
-    // add windows to eventmanager
     evm.add(evh, window);
 
 }
 
 Toolbar::Frame::~Frame() {
     FbTk::EventManager &evm = *FbTk::EventManager::instance();
-    // remove windows from eventmanager
     evm.remove(window);
 }
 
-Toolbar::Toolbar(BScreen &scrn, FbTk::XLayer &layer, size_t width):
+Toolbar::Toolbar(BScreen &scrn, FbTk::Layer &layer, size_t width):
     m_hidden(false),
     frame(*this, scrn.screenNumber()),
     m_window_pm(0),
@@ -210,15 +187,15 @@ Toolbar::Toolbar(BScreen &scrn, FbTk::XLayer &layer, size_t width):
     m_layeritem(frame.window, layer),
     m_layermenu(scrn.menuTheme(),
                 scrn.imageControl(),
-                *scrn.layerManager().getLayer(Layer::MENU),
+                *scrn.layerManager().getLayer(ResourceLayer::MENU),
                 this,
                 true),
     m_placementmenu(scrn.menuTheme(),
                     scrn.imageControl(),
-                    *scrn.layerManager().getLayer(Layer::MENU)),
+                    *scrn.layerManager().getLayer(ResourceLayer::MENU)),
     m_toolbarmenu(scrn.menuTheme(),
                   scrn.imageControl(),
-                  *scrn.layerManager().getLayer(Layer::MENU)),
+                  *scrn.layerManager().getLayer(ResourceLayer::MENU)),
 #ifdef XINERAMA
     m_xineramaheadmenu(0),
 #endif // XINERAMA
@@ -231,30 +208,35 @@ Toolbar::Toolbar(BScreen &scrn, FbTk::XLayer &layer, size_t width):
     m_rc_maximize_over(scrn.resourceManager(), false,
                        scrn.name() + ".toolbar.maxOver", scrn.altName() + ".Toolbar.MaxOver"),
     m_rc_visible(scrn.resourceManager(), true, scrn.name() + ".toolbar.visible", scrn.altName() + ".Toolbar.Visible"),
-    m_rc_width_percent(scrn.resourceManager(), 66,
+    m_rc_width_percent(scrn.resourceManager(), 100,
                        scrn.name() + ".toolbar.widthPercent", scrn.altName() + ".Toolbar.WidthPercent"),
     m_rc_alpha(scrn.resourceManager(), 255,
                        scrn.name() + ".toolbar.alpha", scrn.altName() + ".Toolbar.Alpha"),
-    m_rc_layernum(scrn.resourceManager(), Layer(Layer::DOCK),
+    m_rc_layernum(scrn.resourceManager(), ResourceLayer(ResourceLayer::DOCK),
                   scrn.name() + ".toolbar.layer", scrn.altName() + ".Toolbar.Layer"),
-    m_rc_on_head(scrn.resourceManager(), 0,
+    m_rc_on_head(scrn.resourceManager(), 1,
                  scrn.name() + ".toolbar.onhead", scrn.altName() + ".Toolbar.onHead"),
     m_rc_placement(scrn.resourceManager(), Toolbar::BOTTOMCENTER,
                    scrn.name() + ".toolbar.placement", scrn.altName() + ".Toolbar.Placement"),
     m_rc_height(scrn.resourceManager(), 0, scrn.name() + ".toolbar.height", scrn.altName() + ".Toolbar.Height"),
-    m_rc_tools(scrn.resourceManager(), "workspacename, prevworkspace, nextworkspace, iconbar, systemtray, prevwindow, nextwindow, clock",
+    m_rc_tools(scrn.resourceManager(), "prevworkspace, workspacename, nextworkspace, iconbar, systemtray, clock",
                scrn.name() + ".toolbar.tools", scrn.altName() + ".Toolbar.Tools"),
     m_shape(new FbTk::Shape(frame.window, 0)),
     m_resize_lock(false) {
     _FB_USES_NLS;
-    // NOTE: first subject is always the rearrangeItem !
-    m_observers.push_back(makeObserver(*this, &Toolbar::rearrangeItems));
+
+    frame.window.setWindowRole("fluxbox-toolbar");
+
+    // get this on antialias change
+    m_signal_tracker.join(screen().reconfigureSig(),
+            FbTk::MemFunIgnoreArgs(*this, &Toolbar::reconfigure));
+
     // we need to get notified when the theme is reloaded
-    m_observers.push_back(makeObserver(*this, &Toolbar::reconfigure));
-    m_theme.reconfigSig().attach(m_observers.back());
-    screen().reconfigureSig().attach(m_observers.back()); // get this on antialias change
+    m_signal_tracker.join(m_theme.reconfigSig(), FbTk::MemFun(*this, &Toolbar::reconfigure));
+
     // listen to screen size changes
-    screen().resizeSig().attach(m_observers.back());
+    m_signal_tracker.join(screen().resizeSig(),
+                          FbTk::MemFun(*this, &Toolbar::screenChanged));
 
 
     moveToLayer((*m_rc_layernum).getNum());
@@ -276,7 +258,7 @@ Toolbar::Toolbar(BScreen &scrn, FbTk::XLayer &layer, size_t width):
     frame.grab_x = frame.grab_y = 0;
 
     // setup hide timer
-    m_hide_timer.setTimeout(Fluxbox::instance()->getAutoRaiseDelay());
+    m_hide_timer.setTimeout(Fluxbox::instance()->getAutoRaiseDelay() * FbTk::FbTime::IN_MILLISECONDS);
     FbTk::RefCount<FbTk::Command<void> > toggle_hidden(new FbTk::SimpleCommand<Toolbar>(*this, &Toolbar::toggleHidden));
     m_hide_timer.setCommand(toggle_hidden);
     m_hide_timer.fireOnce(true);
@@ -380,10 +362,16 @@ void Toolbar::lower() {
     m_layeritem.lower();
 }
 
+void Toolbar::screenChanged(BScreen &screen) {
+    reconfigure();
+}
+
 void Toolbar::reconfigure() {
 
     updateVisibleState();
 
+    if (doAutoHide() && !isHidden() && !m_hide_timer.isTiming())
+        m_hide_timer.start();
     if (!doAutoHide() && isHidden())
         toggleHidden();
 
@@ -425,10 +413,6 @@ void Toolbar::reconfigure() {
         m_tools = tools; // copy values
 
         if (!m_tools.empty()) {
-            // make lower case
-            transform(m_tools.begin(), m_tools.end(),
-                      m_tools.begin(),
-                      FbTk::StringUtil::toLower);
 
             // create items
             StringList::const_iterator item_it = m_tools.begin();
@@ -438,9 +422,8 @@ void Toolbar::reconfigure() {
                 if (item == 0)
                     continue;
                 m_item_list.push_back(item);
-                // attach to first observer ( which must be rearrangeItems )
-                item->resizeSig().attach(m_observers[0]);
-
+                m_signal_tracker.join(item->resizeSig(),
+                        FbTk::MemFun(*this, &Toolbar::rearrangeItems));
             }
             // show all items
             frame.window.showSubwindows();
@@ -449,9 +432,6 @@ void Toolbar::reconfigure() {
     } else { // just update the menu
         menu().reconfigure();
     }
-
-    if (doAutoHide())
-        m_hide_timer.start();
 
     frame.bevel_w = theme()->bevelWidth();
     // destroy shape if the theme wasn't specified with one,
@@ -511,18 +491,11 @@ void Toolbar::reconfigure() {
     if (theme()->shape() && m_shape.get())
         m_shape->update();
 
-    ItemList::iterator item_it = m_item_list.begin();
-    ItemList::iterator item_it_end = m_item_list.end();
-    for (; item_it != item_it_end; ++item_it) {
-        (*item_it)->updateSizing();
-    }
+    forAll(m_item_list, std::mem_fun(&ToolbarItem::updateSizing));
 
     rearrangeItems();
 
-    for (item_it = m_item_list.begin(); item_it != item_it_end; ++item_it) {
-        (*item_it)->renderTheme(alpha());
-    }
-
+    forAll(m_item_list, std::bind2nd(std::mem_fun(&ToolbarItem::renderTheme), alpha()));
 
     // we're done with all resizing and stuff now we can request a new
     // area to be reserved on screen
@@ -547,22 +520,9 @@ void Toolbar::buttonPressEvent(XButtonEvent &be) {
     if (be.button != 3)
         return;
 
-    int head = screen().getHead(be.x_root, be.y_root);
-    int borderw = menu().fbwindow().borderWidth();
-    pair<int, int> m = screen().clampToHead(head,
-                                            be.x_root - (menu().width() / 2),
-                                            be.y_root - (menu().titleWindow().height() / 2),
-                                            menu().width() + 2*borderw,
-                                            menu().height() + 2*borderw);
-
-    menu().setScreen(screen().getHeadX(head),
-                     screen().getHeadY(head),
-                     screen().getHeadWidth(head),
-                     screen().getHeadHeight(head));
-    menu().move(m.first, m.second);
-    menu().show();
-    menu().grabInputFocus();
-
+    screen()
+        .placementStrategy()
+        .placeAndShowMenu(menu(), be.x_root, be.y_root, false);
 }
 
 void Toolbar::enterNotifyEvent(XCrossingEvent &ce) {
@@ -648,7 +608,6 @@ void Toolbar::setPlacement(Toolbar::Placement where) {
         head_h = screen().getHeadHeight(head);
     }
 
-    int bevel_width = theme()->bevelWidth();
     int border_width = theme()->border().width();
 
     frame.width = (head_w - 2*border_width) * (*m_rc_width_percent) / 100;
@@ -675,8 +634,7 @@ void Toolbar::setPlacement(Toolbar::Placement where) {
 
 
     // So we get at least one pixel visible in hidden mode
-    if (bevel_width <= border_width)
-        bevel_width = border_width + 1;
+    int pixel = (border_width == 0 ? 1 : 0);
 
     FbTk::Orientation orient = FbTk::ROT0;
 
@@ -685,7 +643,7 @@ void Toolbar::setPlacement(Toolbar::Placement where) {
         frame.x = head_x;
         frame.y = head_y;
         frame.x_hidden = head_x;
-        frame.y_hidden = head_y + bevel_width - border_width - frame.height;
+        frame.y_hidden = head_y - border_width - frame.height + pixel;
         if (m_shape.get())
             m_shape->setPlaces(FbTk::Shape::BOTTOMRIGHT | FbTk::Shape::BOTTOMLEFT);
         break;
@@ -694,7 +652,7 @@ void Toolbar::setPlacement(Toolbar::Placement where) {
         frame.x = head_x;
         frame.y = head_y + head_h - frame.height - border_width*2;
         frame.x_hidden = head_x;
-        frame.y_hidden = head_y + head_h - bevel_width - border_width;
+        frame.y_hidden = head_y + head_h - border_width - pixel;
         if (m_shape.get())
             m_shape->setPlaces(FbTk::Shape::TOPRIGHT | FbTk::Shape::TOPLEFT);
         break;
@@ -703,7 +661,7 @@ void Toolbar::setPlacement(Toolbar::Placement where) {
         frame.x = head_x + (head_w - frame.width) / 2 - border_width;
         frame.y = head_y;
         frame.x_hidden = frame.x;
-        frame.y_hidden = head_y + bevel_width - border_width - frame.height;
+        frame.y_hidden = head_y - border_width - frame.height + pixel;
         if (m_shape.get())
             m_shape->setPlaces(FbTk::Shape::BOTTOMRIGHT | FbTk::Shape::BOTTOMLEFT);
         break;
@@ -711,7 +669,7 @@ void Toolbar::setPlacement(Toolbar::Placement where) {
         frame.x = head_x + head_w - frame.width - border_width*2;
         frame.y = head_y;
         frame.x_hidden = frame.x;
-        frame.y_hidden = head_y + bevel_width - border_width - frame.height;
+        frame.y_hidden = head_y - border_width - frame.height + pixel;
         if (m_shape.get())
             m_shape->setPlaces(FbTk::Shape::BOTTOMRIGHT | FbTk::Shape::BOTTOMLEFT);
         break;
@@ -720,7 +678,7 @@ void Toolbar::setPlacement(Toolbar::Placement where) {
         frame.x = head_x + head_w - frame.width - border_width*2;
         frame.y = head_y + head_h - frame.height - border_width*2;
         frame.x_hidden = frame.x;
-        frame.y_hidden = head_y + head_h - bevel_width - border_width;
+        frame.y_hidden = head_y + head_h - border_width - pixel;
         if (m_shape.get())
             m_shape->setPlaces(FbTk::Shape::TOPRIGHT | FbTk::Shape::TOPLEFT);
         break;
@@ -729,7 +687,7 @@ void Toolbar::setPlacement(Toolbar::Placement where) {
         frame.x = head_x + (head_w - frame.width) / 2 - border_width;
         frame.y = head_y + head_h - frame.height - border_width*2;
         frame.x_hidden = frame.x;
-        frame.y_hidden = head_y + head_h - bevel_width - border_width;
+        frame.y_hidden = head_y + head_h - border_width - pixel;
         if (m_shape.get())
             m_shape->setPlaces(FbTk::Shape::TOPRIGHT | FbTk::Shape::TOPLEFT);
         break;
@@ -737,7 +695,7 @@ void Toolbar::setPlacement(Toolbar::Placement where) {
         orient = FbTk::ROT270;
         frame.x = head_x;
         frame.y = head_y + (head_h - frame.height)/2 - border_width;
-        frame.x_hidden = frame.x - frame.width + bevel_width + border_width;
+        frame.x_hidden = frame.x - frame.width - border_width + pixel;
         frame.y_hidden = frame.y;
         if (m_shape.get())
             m_shape->setPlaces(FbTk::Shape::TOPRIGHT | FbTk::Shape::BOTTOMRIGHT);
@@ -746,7 +704,7 @@ void Toolbar::setPlacement(Toolbar::Placement where) {
         orient = FbTk::ROT270;
         frame.x = head_x;
         frame.y = head_y;
-        frame.x_hidden = frame.x - frame.width + bevel_width + border_width;
+        frame.x_hidden = frame.x - frame.width - border_width + pixel;
         frame.y_hidden = frame.y;
         if (m_shape.get())
             m_shape->setPlaces(FbTk::Shape::TOPRIGHT | FbTk::Shape::BOTTOMRIGHT);
@@ -755,7 +713,7 @@ void Toolbar::setPlacement(Toolbar::Placement where) {
         orient = FbTk::ROT270;
         frame.x = head_x;
         frame.y = head_y + head_h - frame.height - border_width*2;
-        frame.x_hidden = frame.x - frame.width + bevel_width + border_width;
+        frame.x_hidden = frame.x - frame.width - border_width + pixel;
         frame.y_hidden = frame.y;
         if (m_shape.get())
             m_shape->setPlaces(FbTk::Shape::TOPRIGHT | FbTk::Shape::BOTTOMRIGHT);
@@ -764,7 +722,7 @@ void Toolbar::setPlacement(Toolbar::Placement where) {
         orient = FbTk::ROT90;
         frame.x = head_x + head_w - frame.width - border_width*2;
         frame.y = head_y + (head_h - frame.height)/2 - border_width;
-        frame.x_hidden = frame.x + frame.width - bevel_width - border_width;
+        frame.x_hidden = frame.x + frame.width + border_width - pixel;
         frame.y_hidden = frame.y;
         if (m_shape.get())
             m_shape->setPlaces(FbTk::Shape::TOPLEFT | FbTk::Shape::BOTTOMLEFT);
@@ -773,7 +731,7 @@ void Toolbar::setPlacement(Toolbar::Placement where) {
         orient = FbTk::ROT90;
         frame.x = head_x + head_w - frame.width - border_width*2;
         frame.y = head_y;
-        frame.x_hidden = frame.x + frame.width - bevel_width - border_width;
+        frame.x_hidden = frame.x + frame.width + border_width - pixel;
         frame.y_hidden = frame.y;
         if (m_shape.get())
             m_shape->setPlaces(FbTk::Shape::TOPLEFT | FbTk::Shape::BOTTOMLEFT);
@@ -782,17 +740,14 @@ void Toolbar::setPlacement(Toolbar::Placement where) {
         orient = FbTk::ROT90;
         frame.x = head_x + head_w - frame.width - border_width*2;
         frame.y = head_y + head_h - frame.height - border_width*2;
-        frame.x_hidden = frame.x + frame.width - bevel_width - border_width;
+        frame.x_hidden = frame.x + frame.width + border_width - pixel;
         frame.y_hidden = frame.y;
         if (m_shape.get())
             m_shape->setPlaces(FbTk::Shape::TOPLEFT | FbTk::Shape::BOTTOMLEFT);
         break;
     }
 
-    ItemList::iterator item_it = m_item_list.begin();
-    ItemList::iterator item_it_end = m_item_list.end();
-    for (; item_it != item_it_end; ++item_it)
-        (*item_it)->setOrientation(orient);
+    forAll(m_item_list, std::bind2nd(std::mem_fun(&ToolbarItem::setOrientation), orient));
 }
 
 void Toolbar::updateVisibleState() {
@@ -807,10 +762,7 @@ void Toolbar::toggleHidden() {
         frame.window.move(frame.x_hidden, frame.y_hidden);
     else {
         frame.window.move(frame.x, frame.y);
-        ItemList::iterator item_it = m_item_list.begin();
-        ItemList::iterator item_it_end = m_item_list.end();
-        for ( ; item_it != item_it_end; ++item_it)
-            (*item_it)->parentMoved();
+        forAll(m_item_list, std::mem_fun(&ToolbarItem::parentMoved));
     }
 
 }
@@ -876,7 +828,7 @@ void Toolbar::setupMenus(bool skip_new_placement) {
                       new XineramaHeadMenu<Toolbar>(screen().menuTheme(),
                                                     screen(),
                                                     screen().imageControl(),
-                                                    *screen().layerManager().getLayer(::Layer::MENU),
+                                                    *screen().layerManager().getLayer(::ResourceLayer::MENU),
                                                     *this,
                                                     _FB_XTEXT(Toolbar, OnHead, "Toolbar on Head",
                                                               "Title of toolbar on head menu")));
@@ -886,41 +838,39 @@ void Toolbar::setupMenus(bool skip_new_placement) {
 
     // menu is 3 wide, 5 down
     if (!skip_new_placement) {
-        typedef pair<FbTk::FbString, Toolbar::Placement> PlacementP;
-        typedef list<PlacementP> Placements;
-        Placements place_menu;
+        struct PlacementP {
+             const FbTk::FbString label;
+             Toolbar::Placement placement;
+        };
 
-        place_menu.push_back(PlacementP(_FB_XTEXT(Align, TopLeft, "Top Left", "Top Left"), Toolbar::TOPLEFT));
-        place_menu.push_back(PlacementP(_FB_XTEXT(Align, LeftTop, "Left Top", "Left Top"), Toolbar::LEFTTOP));
-        place_menu.push_back(PlacementP(_FB_XTEXT(Align, LeftCenter, "Left Center", "Left Center"), Toolbar::LEFTCENTER));
-        place_menu.push_back(PlacementP(_FB_XTEXT(Align, LeftBottom, "Left Bottom", "Left Bottom"), Toolbar::LEFTBOTTOM));
-        place_menu.push_back(PlacementP(_FB_XTEXT(Align, BottomLeft, "Bottom Left", "Bottom Left"), Toolbar::BOTTOMLEFT));
-        place_menu.push_back(PlacementP(_FB_XTEXT(Align, TopCenter, "Top Center", "Top Center"), Toolbar::TOPCENTER));
-        place_menu.push_back(PlacementP("", Toolbar::TOPLEFT));
-        place_menu.push_back(PlacementP("", Toolbar::TOPLEFT));
-        place_menu.push_back(PlacementP("", Toolbar::TOPLEFT));
-        place_menu.push_back(PlacementP(_FB_XTEXT(Align, BottomCenter, "Bottom Center", "Bottom Center"), Toolbar::BOTTOMCENTER));
-        place_menu.push_back(PlacementP(_FB_XTEXT(Align, TopRight, "Top Right", "Top Right"), Toolbar::TOPRIGHT));
-        place_menu.push_back(PlacementP(_FB_XTEXT(Align, RightTop, "Right Top", "Right Top"), Toolbar::RIGHTTOP));
-        place_menu.push_back(PlacementP(_FB_XTEXT(Align, RightCenter, "Right Center", "Right Center"), Toolbar::RIGHTCENTER));
-        place_menu.push_back(PlacementP(_FB_XTEXT(Align, RightBottom, "Right Bottom", "Right Bottom"), Toolbar::RIGHTBOTTOM));
-        place_menu.push_back(PlacementP(_FB_XTEXT(Align, BottomRight, "Bottom Right", "Bottom Right"), Toolbar::BOTTOMRIGHT));
+        static const PlacementP place_menu[] = {
+            { _FB_XTEXT(Align, TopLeft, "Top Left", "Top Left"), Toolbar::TOPLEFT},
+            { _FB_XTEXT(Align, LeftTop, "Left Top", "Left Top"), Toolbar::LEFTTOP},
+            { _FB_XTEXT(Align, LeftCenter, "Left Center", "Left Center"), Toolbar::LEFTCENTER},
+            { _FB_XTEXT(Align, LeftBottom, "Left Bottom", "Left Bottom"), Toolbar::LEFTBOTTOM},
+            { _FB_XTEXT(Align, BottomLeft, "Bottom Left", "Bottom Left"), Toolbar::BOTTOMLEFT},
+            { _FB_XTEXT(Align, TopCenter, "Top Center", "Top Center"), Toolbar::TOPCENTER},
+            { "", Toolbar::TOPLEFT},
+            { "", Toolbar::TOPLEFT},
+            { "", Toolbar::TOPLEFT},
+            { _FB_XTEXT(Align, BottomCenter, "Bottom Center", "Bottom Center"), Toolbar::BOTTOMCENTER},
+            { _FB_XTEXT(Align, TopRight, "Top Right", "Top Right"), Toolbar::TOPRIGHT},
+            { _FB_XTEXT(Align, RightTop, "Right Top", "Right Top"), Toolbar::RIGHTTOP},
+            { _FB_XTEXT(Align, RightCenter, "Right Center", "Right Center"), Toolbar::RIGHTCENTER},
+            { _FB_XTEXT(Align, RightBottom, "Right Bottom", "Right Bottom"), Toolbar::RIGHTBOTTOM},
+            { _FB_XTEXT(Align, BottomRight, "Bottom Right", "Bottom Right"), Toolbar::BOTTOMRIGHT}
+        };
 
-
-        placementMenu().setMinimumSublevels(3);
+        placementMenu().setMinimumColumns(3);
         // create items in sub menu
-        for (size_t i=0; i<15; ++i) {
-            FbTk::FbString &str = place_menu.front().first;
-            Toolbar::Placement placement = place_menu.front().second;
-
-            if (str == "") {
-                placementMenu().insert("");
+        for (size_t i=0; i< sizeof(place_menu)/sizeof(PlacementP); ++i) {
+            const PlacementP& p = place_menu[i];
+            if (p.label == "") {
+                placementMenu().insert(p.label);
                 placementMenu().setItemEnabled(i, false);
             } else
-                placementMenu().insert(new PlaceToolbarMenuItem(str, *this,
-                                                                placement));
-
-            place_menu.pop_front();
+                placementMenu().insert(new PlaceToolbarMenuItem(p.label, *this,
+                                                                p.placement));
         }
     }
 

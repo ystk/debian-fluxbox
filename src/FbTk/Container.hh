@@ -29,6 +29,7 @@
 #include "Orientation.hh"
 
 #include <list>
+#include <functional>
 
 namespace FbTk {
 
@@ -43,7 +44,7 @@ public:
     typedef const Button * ConstItem;
     typedef std::list<Item> ItemList;
 
-    explicit Container(const FbWindow &parent);
+    explicit Container(const FbWindow &parent, bool auto_resize = true);
     virtual ~Container();
 
     // manipulators
@@ -90,7 +91,7 @@ public:
     bool updateLock() const { return m_update_lock; }
 
     void for_each(std::mem_fun_t<void, FbWindow> function);
-    void setAlpha(unsigned char alpha); // set alpha on all windows
+    void setAlpha(int alpha); // set alpha on all windows
 
     ItemList::iterator begin() { return m_item_list.begin(); }
     ItemList::iterator end() { return m_item_list.end(); }
@@ -106,7 +107,7 @@ private:
     unsigned int m_max_size_per_client;
     unsigned int m_max_total_size;
     ItemList m_item_list;
-    bool m_update_lock;
+    bool m_update_lock, m_auto_resize;
 };
 
 } // end namespace FbTk

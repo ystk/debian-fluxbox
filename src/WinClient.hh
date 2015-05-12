@@ -78,7 +78,6 @@ public:
     bool focus(); // calls Window->setCurrentClient to give focus to this client
     bool isFocused() const;
     void setAttentionState(bool value);
-    const std::string &title() const { return m_title; }
 
     void setGroupLeftWindow(Window win);
 
@@ -97,6 +96,8 @@ public:
     std::string getWMRole() const;
     WindowState::WindowType getWindowType() const { return m_window_type; }
     void setWindowType(WindowState::WindowType type) { m_window_type = type; }
+    long getCardinalProperty(Atom prop,bool*exists=NULL) const { return FbTk::FbWindow::cardinalProperty(prop,exists); }
+    FbTk::FbString getTextProperty(Atom prop,bool*exists=NULL) const { return FbTk::FbWindow::textProperty(prop,exists); }
 
     WinClient *transientFor() { return transient_for; }
     const WinClient *transientFor() const { return transient_for; }

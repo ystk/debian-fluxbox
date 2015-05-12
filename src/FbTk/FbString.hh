@@ -30,11 +30,32 @@
 #include <iconv.h>
 #endif // HAVE_ICONV
 
+#include "NotCopyable.hh"
+
 namespace FbTk {
 
 // Use this type for things converted to our internal encoding (UTF-8)
 // (or just plain whatever for now if no utf-8 available)
 typedef std::string FbString;
+
+class BiDiString {
+
+public:
+
+    BiDiString(const FbString& logical = FbString());
+
+    const FbString& logical() const { return m_logical; }
+    const FbString& visual() const;
+
+    const FbString& setLogical(const FbString& logical);
+
+private:
+    FbString m_logical;
+#ifdef HAVE_FRIBIDI
+    mutable FbString m_visual;
+    mutable bool m_visual_dirty;
+#endif
+};
 
 namespace FbStringUtil {
 
@@ -56,7 +77,7 @@ bool haveUTF8();
 
 } // namespace FbStringUtil
 
-class StringConvertor {
+class StringConvertor: private NotCopyable {
 public:
 
     enum EncodingTarget { ToFbString, ToLocaleStr };
@@ -65,23 +86,14 @@ public:
     ~StringConvertor();
 
     bool setSource(const std::string &encoding);
-    void reset() {
-#ifdef HAVE_ICONV
- if (m_iconv != ((iconv_t)-1))
-     iconv_close(m_iconv);
- m_iconv = ((iconv_t)(-1));
-#endif
-    }
+    void reset();
 
-    std::string recode(const std::string &src);
+    FbString recode(const FbString &src);
 
 private:
 #ifdef HAVE_ICONV
     iconv_t m_iconv;
-#else
-    int m_iconv;
 #endif
-
     std::string m_destencoding;
 };
 

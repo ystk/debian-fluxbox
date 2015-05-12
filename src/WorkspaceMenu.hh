@@ -23,6 +23,7 @@
 #define WORKSPACEMENU_HH
 
 #include "FbMenu.hh"
+#include "FbTk/Signal.hh"
 
 class BScreen;
 
@@ -33,15 +34,19 @@ class BScreen;
  * workspace name.
  * It also contains client menus for all clients.
  */
-class WorkspaceMenu: public FbMenu {
+class WorkspaceMenu: public FbMenu, private FbTk::SignalTracker {
 public:
     explicit WorkspaceMenu(BScreen &screen);
     virtual ~WorkspaceMenu() { }
-    /// called when a subject is sending a signal
-    void update(FbTk::Subject *subj);
+
 private:
     /// initialize menu for the screen
     void init(BScreen &screen);
+    /// Called when workspace info was changed 
+    /// ( number of workspace, workspace names etc )
+    void workspaceInfoChanged(BScreen& screen);
+    /// Called when workspace was switched.
+    void workspaceChanged(BScreen& screen);
 };
 
 #endif //  WORKSPACEMENU_HH

@@ -58,7 +58,7 @@ command="`basename \"$0\"`"
 display_usage() {
     cat << EOF
 Usage: $command [-u/-U [wallpapersetter]] [-fFcCtTaA] /path/to/wallpaper
-       $command [-u/-U [wallpapersetter]] [-fFcCtTaA] -r/-R /path/to/wallpaperdirectory
+       $command [-u/-U [wallpapersetter]] [-fFcCtTaA] -r/-R /path/to/directory
        $command [-b/-B fbsetrootoptions]
        $command [-lhip]
 Use \`\`$command -h'' for a complete help message.
@@ -72,17 +72,21 @@ display_help() {
 
 Options:
 
+    -u  Use specified wallpapersetter, use no argument to forget.
+
     -f  Set fullscreen wallpaper (default).
     -c  Set centered wallpaper.
     -t  Set tiled wallpaper.
     -a  Set maximized wallpaper, preserving aspect.
-        ( if your bgsetter doesn't support this
+        ( if your wallpapersetter doesn't support this
           we fall back to -f )
-    -u  Use specified wallpapersetter, use no argument to forget.
-    -b  Forward the options to fbsetroot.
+
     -r  set random wallpaper from a directory
 
-    -F,-C,-T,-A,-U,-B,-R same as uncapsed but without remembering.
+    -b  Forward the rest of the arguments to fbsetroot(1).
+        This can be used to set solid, pattern, or gradient backgrounds.
+
+    -F,-C,-T,-A,-U,-B,-R same as lower-case, but without remembering.
 
     -h  Display this help.
 
@@ -118,10 +122,10 @@ Common tips to use with $command:
 
    perl -pi -e 's,([^f]|^)bsetbg,$command,' filename
 
-2) If you want the style to set the wallpaper and you want $command to
-   remember the previous wallpaper put this in your ~/.fluxbox/init
+2) If you want to set the wallpaper and you want $command to
+   remember the previous wallpaper put this in your ~/.fluxbox/overlay
 
-   session.screen0.rootCommand:    $command -l
+   background: none
 
 3) Use $command -i to find out what wallpapersetter $command will be
    used and what $command thinks about it.
@@ -308,6 +312,7 @@ while [ $# -gt 0 ]; do
                 remember=false
                 break
             fi
+            ignore_missing_wallpaper=true
             style="style"
             shift ;;
         -Z)
@@ -443,7 +448,7 @@ case $WPSETTER in
         full='--bg-scale'
         tile='--bg-tile'
         center='--bg-center'
-        aspect=$full
+        aspect="--bg-fill"
         debugstory=$standardok
         ;;
     hsetroot)
@@ -500,7 +505,11 @@ if [ "$option" = random ]; then
             randomnumber=`random_number`
         # some shells don't support $RANDOM
         elif [ -z "$RANDOM" ]; then
-            randomnumber=`(echo $$ ;time ps; w ; date )2>&1 | cksum | cut -f1 -d' '`
+            if [ -r /dev/urandom ]; then
+                randomnumber=`hexdump -n 2 -e '/2 "%u"' /dev/urandom`
+            else
+                randomnumber=`(echo $$; ps; w; date) 2>&1 | cksum | cut -f1 -d' '`
+            fi
         else
             randomnumber="$RANDOM"
         fi
@@ -521,6 +530,9 @@ fi
 
 
 if [ ! -r "$wallpaper" ]; then
+	if [ "$ignore_missing_wallpaper" = "true" ]; then
+		exit 0
+	fi
     message "Can't find wallpaper $wallpaper"
     exit 1
 fi

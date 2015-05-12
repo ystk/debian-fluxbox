@@ -33,7 +33,6 @@
 #include <X11/Xutil.h>
 
 #include <memory>
-#include <stdexcept>
 
 using std::string;
 
@@ -45,12 +44,13 @@ TextDialog::TextDialog(BScreen &screen,
         const string &title) :
     FbTk::FbWindow(screen.rootWindow().screenNumber(), 0, 0, 200, 1, ExposureMask),
     m_textbox(*this, screen.focusedWinFrameTheme()->font(), ""),
-    m_label(*this, screen.focusedWinFrameTheme()->font(), title),
+    m_label(*this, screen.focusedWinFrameTheme()->iconbarTheme().text().font(), title),
     m_gc(m_textbox),
     m_screen(screen),
     m_move_x(0),
     m_move_y(0),
     m_pixmap(0){
+    setWindowRole("fluxbox-dialog-text");
     init();
 }
 
@@ -63,7 +63,7 @@ TextDialog::~TextDialog() {
 }
 
 
-void TextDialog::setText(const string &text) {
+void TextDialog::setText(const FbTk::BiDiString& text) {
     m_textbox.setText(text);
 }
 
@@ -136,19 +136,28 @@ void TextDialog::keyPressEvent(XKeyEvent &event) {
 }
 
 void TextDialog::render() {
-    Pixmap tmp = m_pixmap;
-    if (!m_screen.focusedWinFrameTheme()->iconbarTheme().texture().usePixmap()) {
-        m_label.setBackgroundColor(m_screen.focusedWinFrameTheme()->iconbarTheme().texture().color());
-        m_pixmap = 0;
+    if (m_screen.focusedWinFrameTheme()->iconbarTheme().texture().type() &
+        FbTk::Texture::PARENTRELATIVE) {
+        if (!m_screen.focusedWinFrameTheme()->titleTexture().usePixmap()) {
+            m_pixmap = None;
+            m_label.setBackgroundColor(m_screen.focusedWinFrameTheme()->titleTexture().color());
+        } else {
+            m_pixmap = m_screen.imageControl().renderImage(m_label.width(), m_label.height(),
+                    m_screen.focusedWinFrameTheme()->titleTexture());
+            m_label.setBackgroundPixmap(m_pixmap);
+        }
     } else {
-        m_pixmap = m_screen.imageControl().renderImage(m_label.width(), m_label.height(),
-                                                       m_screen.focusedWinFrameTheme()->iconbarTheme().texture());
-        m_label.setBackgroundPixmap(m_pixmap);
+        if (!m_screen.focusedWinFrameTheme()->iconbarTheme().texture().usePixmap()) {
+            m_pixmap = None;
+            m_label.setBackgroundColor(m_screen.focusedWinFrameTheme()->iconbarTheme().texture().color());
+        } else {
+            m_pixmap = m_screen.imageControl().renderImage(m_label.width(), m_label.height(),
+                    m_screen.focusedWinFrameTheme()->iconbarTheme().texture());
+            m_label.setBackgroundPixmap(m_pixmap);
+        }
     }
-
-    if (tmp)
-        m_screen.imageControl().removeImage(tmp);
-
+    if (m_pixmap)
+        m_screen.imageControl().removeImage(m_pixmap);
 }
 
 void TextDialog::init() {
@@ -157,6 +166,7 @@ void TextDialog::init() {
     // we listen to motion notify too
     m_label.setEventMask(m_label.eventMask() | ButtonPressMask | ButtonMotionMask);
     m_label.setGC(m_screen.focusedWinFrameTheme()->iconbarTheme().text().textGC());
+    m_label.setJustify(m_screen.focusedWinFrameTheme()->iconbarTheme().text().justify());
     m_label.show();
 
     // setup text box
@@ -168,10 +178,14 @@ void TextDialog::init() {
     m_textbox.show();
 
     // setup this window
-    setBorderWidth(1);
-    setBackgroundColor(white);
-    // move to center of the screen
-    move((m_screen.width() - width())/2, (m_screen.height() - height())/2);
+    setBorderWidth(m_screen.focusedWinFrameTheme()->border().width());
+    setBorderColor(m_screen.focusedWinFrameTheme()->border().color());
+
+    // move to center of the current head
+    unsigned int head = m_screen.getCurrHead();
+    move(m_screen.getHeadX(head) + (m_screen.getHeadWidth(head) - width()) / 2,
+         m_screen.getHeadY(head) + (m_screen.getHeadHeight(head) - height()) / 2);
+
 
     updateSizes();
     resize(width(), m_textbox.height() + m_label.height());
@@ -186,6 +200,6 @@ void TextDialog::updateSizes() {
     m_label.moveResize(0, 0,
                        width(), m_textbox.font().height() + 2);
 
-    m_textbox.moveResize(2, m_label.height(),
-                         width() - 4, m_textbox.font().height() + 2);
+    m_textbox.moveResize(0, m_label.height(),
+                         width(), m_textbox.font().height() + 2);
 }

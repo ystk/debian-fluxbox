@@ -1,5 +1,5 @@
 // ClientMenu.hh
-// Copyright (c) 2007 Fluxbox Team (fluxgen at fluxbox dot org)
+// Copyright (c) 2007-2008 Fluxbox Team (fluxgen at fluxbox dot org)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
@@ -25,21 +25,23 @@
 #include "Screen.hh"
 #include "Window.hh"
 #include "WindowCmd.hh"
+#include "FocusControl.hh"
 #include <X11/keysym.h>
 
 #include "FbTk/MenuItem.hh"
+#include "FbTk/MemFun.hh"
 
 namespace { // anonymous
 
 class ClientMenuItem: public FbTk::MenuItem {
 public:
     ClientMenuItem(Focusable &client, ClientMenu &menu):
-        FbTk::MenuItem(client.title().c_str(), menu),
+        FbTk::MenuItem(client.title(), menu),
         m_client(client) {
-            client.titleSig().attach(&menu);
-            client.dieSig().attach(&menu);
-        }
-    ~ClientMenuItem() { m_client.titleSig().detach(menu()); }
+        m_signals.join(client.titleSig(),
+                       FbTk::MemFunSelectArg1(menu, &ClientMenu::titleChanged));
+        m_signals.join(client.dieSig(), FbTk::MemFun(menu, &ClientMenu::clientDied));
+    }
 
     void click(int button, int time, unsigned int mods) {
         FluxboxWindow *fbwin = m_client.fbwindow();
@@ -47,16 +49,22 @@ public:
             return;
 
         // this MenuItem object can get destroyed as a result of focus(), so we
-        // must get a local copy of the parent menu
+        // must get a local copy of anything we want to use here
+        // AFTER ~ClientMenuItem() is called.
         FbTk::Menu *parent = menu();
+        FocusControl& focus_control = m_client.screen().focusControl();
 
         m_client.focus();
         fbwin->raise();
-        if ((mods & ControlMask) == 0)
+        if ((mods & ControlMask) == 0) {
+            // Ignore any focus changes due to this menu closing
+            // (even in StrictMouseFocus mode)
+            focus_control.ignoreAtPointer(true);
             parent->hide();
+        }
     }
 
-    const std::string &label() const { return m_client.title(); }
+    const FbTk::BiDiString &label() const { return m_client.title(); }
     const FbTk::PixmapWithMask *icon() const {
         return m_client.screen().clientMenuUsePixmap() ? &m_client.icon() : 0;
     }
@@ -74,19 +82,22 @@ public:
 
 private:
     Focusable &m_client;
+    FbTk::SignalTracker m_signals;
 };
 
-}; // end anonymous namespace
+} // end anonymous namespace
 
 ClientMenu::ClientMenu(BScreen &screen, Focusables &clients,
-                       FbTk::Subject *refresh):
+                       bool listen_for_iconlist_changes):
     FbMenu(screen.menuTheme(), screen.imageControl(),
-           *screen.layerManager().getLayer(Layer::MENU)),
-    m_list(clients),
-    m_refresh_sig(refresh) {
+           *screen.layerManager().getLayer(ResourceLayer::MENU)),
+    m_list(clients) {
 
-    if (refresh)
-        refresh->attach(this);
+    if (listen_for_iconlist_changes) {
+        m_slots.join(screen.iconListSig(),
+                     FbTk::MemFun(*this, &ClientMenu::updateClientList));
+    }
+
     refreshMenu();
 
 }
@@ -115,32 +126,38 @@ void ClientMenu::refreshMenu() {
     updateMenu();
 }
 
-void ClientMenu::update(FbTk::Subject *subj) {
-    if (subj == m_refresh_sig)
-        refreshMenu();
-    else if (subj && typeid(*subj) == typeid(Focusable::FocusSubject)) {
+namespace {
 
-        Focusable::FocusSubject *fsubj = static_cast<Focusable::FocusSubject *>(subj);
-        Focusable &win = fsubj->win();
-
-        // find the corresponding menuitem
-        ClientMenuItem *cl_item = 0;
-        for (size_t i = 0; i < numberOfItems(); i++) {
-            FbTk::MenuItem *item = find(i);
-            if (item && typeid(*item) == typeid(ClientMenuItem)) {
-                cl_item = static_cast<ClientMenuItem *>(item);
-                if (cl_item->client() == &win)
-                    break;
-            }
+ClientMenuItem* getMenuItem(ClientMenu& menu, Focusable& win) {
+    // find the corresponding menuitem
+    ClientMenuItem *cl_item = 0;
+    for (size_t i = 0; i < menu.numberOfItems(); i++) {
+        FbTk::MenuItem *item = menu.find(i);
+        if (item && typeid(*item) == typeid(ClientMenuItem)) {
+            cl_item = static_cast<ClientMenuItem *>(item);
+            if (cl_item->client() == &win)
+                break;
         }
+    }
 
-        // update accordingly
-        if (cl_item && fsubj == &win.dieSig())
-            remove(cl_item->getIndex());
-        else if (cl_item && fsubj == &win.titleSig())
-            // this could change the size of the menu, so do a full update
-            FbTk::Menu::update(subj);
+    return cl_item;
 
-    } else
-        FbTk::Menu::update(subj);
+}
+
+} // anonymous
+
+void ClientMenu::titleChanged(Focusable& win) {
+    // find correct menu item
+    ClientMenuItem* cl_item = getMenuItem(*this, win);
+    if (cl_item)
+        themeReconfigured();
+}
+
+void ClientMenu::clientDied(Focusable &win) {
+    // find correct menu item
+    ClientMenuItem* cl_item = getMenuItem(*this, win);
+
+    // update accordingly
+    if (cl_item)
+        remove(cl_item->getIndex());
 }

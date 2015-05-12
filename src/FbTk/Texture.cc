@@ -22,33 +22,38 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-#include "App.hh"
 #include "Texture.hh"
-
+#include "App.hh"
+#include "StringUtil.hh"
 #include <X11/Xlib.h>
 #ifdef HAVE_CSTRING
   #include <cstring>
 #else
   #include <string.h>
 #endif
-#ifdef HAVE_CCTYPE
-  #include <cctype>
-#else
-  #include <ctype.h>
-#endif
+
+#include "ColorLUT.hh"
+
+namespace {
+
+unsigned short inline brighten(unsigned short c) {
+    return 0x101 * FbTk::ColorLUT::BRIGHTER_8[c];
+}
+
+unsigned short inline darken(unsigned short c) {
+    return 0x101 * FbTk::ColorLUT::PRE_MULTIPLY_0_75[c];
+}
+
+}
 
 namespace FbTk {
 
 void Texture::setFromString(const char * const texture_str) {
     if (texture_str == 0)
         return;
-    int t_len = strlen(texture_str) + 1;
-    char *ts = new char[t_len];
-    strcpy(ts, texture_str);
 
-    // to lower
-    for (size_t byte_pos = 0; byte_pos < strlen(ts); ++byte_pos)
-        ts[byte_pos] = tolower(ts[byte_pos]);
+    const std::string t = FbTk::StringUtil::toLower(texture_str);
+    const char* ts = t.c_str();
 
     if (strstr(ts, "parentrelative")) {
         setType(Texture::PARENTRELATIVE);
@@ -87,7 +92,7 @@ void Texture::setFromString(const char * const texture_str) {
         else if (strstr(ts, "flat"))
             addType(Texture::FLAT);
         else
-            addType(Texture::DEFAULT_BEVEL);
+            addType(Texture::DEFAULT_LEVEL);
 
         if (! (type() & Texture::FLAT)) {
             if (strstr(ts, "bevel2"))
@@ -105,42 +110,25 @@ void Texture::setFromString(const char * const texture_str) {
         if (strstr(ts, "tiled"))
             addType(Texture::TILED);
     }
-
-    delete [] ts;
 }
 
 void Texture::calcHiLoColors(int screen_num) {
     Display *disp = FbTk::App::instance()->display();
-    XColor xcol;
     Colormap colm = DefaultColormap(disp, screen_num);
+    XColor xcol;
 
-    xcol.red = (unsigned int) (m_color.red() +
-                               (m_color.red() >> 1));
-    if (xcol.red >= 0xff) xcol.red = 0xffff;
-    else xcol.red *= 0x101;
-    xcol.green = (unsigned int) (m_color.green() +
-                                 (m_color.green() >> 1));
-    if (xcol.green >= 0xff) xcol.green = 0xffff;
-    else xcol.green *= 0x101;
-    xcol.blue = (unsigned int) (m_color.blue() +
-                                (m_color.blue() >> 1));
-    if (xcol.blue >= 0xff) xcol.blue = 0xffff;
-    else xcol.blue *= 0x101;
+    xcol.red = ::brighten(m_color.red());
+    xcol.green = ::brighten(m_color.green());
+    xcol.blue = ::brighten(m_color.blue());
 
     if (! XAllocColor(disp, colm, &xcol))
         xcol.pixel = 0;
 
     m_hicolor.setPixel(xcol.pixel);
 
-    xcol.red =
-        (unsigned int) ((m_color.red() >> 2) +
-			(m_color.red() >> 1)) * 0x101;
-    xcol.green =
-        (unsigned int) ((m_color.green() >> 2) +
-			(m_color.green() >> 1)) * 0x101;
-    xcol.blue =
-        (unsigned int) ((m_color.blue() >> 2) +
-			(m_color.blue() >> 1)) * 0x101;
+    xcol.red = ::darken(m_color.red());
+    xcol.green = ::darken(m_color.green());
+    xcol.blue = ::darken(m_color.blue());
 
     if (! XAllocColor(disp, colm, &xcol))
         xcol.pixel = 0;

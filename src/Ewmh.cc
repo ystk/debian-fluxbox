@@ -29,24 +29,34 @@
 #include "fluxbox.hh"
 #include "FbWinFrameTheme.hh"
 #include "FocusControl.hh"
+#include "Debug.hh"
 
 #include "FbTk/App.hh"
 #include "FbTk/FbWindow.hh"
 #include "FbTk/I18n.hh"
-#include "FbTk/XLayerItem.hh"
-#include "FbTk/XLayer.hh"
+#include "FbTk/LayerItem.hh"
+#include "FbTk/Layer.hh"
 #include "FbTk/FbPixmap.hh"
 
 #include <X11/Xproto.h>
 #include <X11/Xatom.h>
+
 #include <iostream>
 #include <algorithm>
 #include <new>
+
 #ifdef HAVE_CSTRING
   #include <cstring>
 #else
   #include <string.h>
 #endif
+
+#ifdef HAVE_CSTDLIB
+  #include <cstdlib>
+#else
+  #include <stdlib.h>
+#endif
+
 
 using std::cerr;
 using std::endl;
@@ -76,16 +86,30 @@ namespace {
  * byte being B. The first two cardinals are width, height. Data is in rows,
  * left to right and top to bottom. 
  *
+ ***
+ *
+ * NOTE: the returned data for XA_CARDINAL is long if the rfmt equals
+ * 32. sizeof(long) on 64bit machines is 8. to quote from
+ * "man XGetWindowProperty":
+ *
+ *    If the returned format is 32, the property data will be stored as 
+ *    an array of longs (which in a 64-bit application will be 64-bit 
+ *    values that are padded in the upper 4 bytes).
+ *
+ * this is especially true on 64bit machines when some of the clients
+ * (eg: tvtime, konqueror3) have problems to feed in the right data
+ * into the _NET_WM_ICON property. we faced some segfaults because
+ * width and height were not quite right because of ignoring 64bit
+ * behaviour on client side.
+ *
  * TODO: maybe move the pixmap-creation code to FbTk? */
 void extractNetWmIcon(Atom net_wm_icon, WinClient& winclient) {
 
     typedef std::pair<int, int> Size;
     typedef std::map<Size, const unsigned long*> IconContainer;
 
-    // attention: the returned data for XA_CARDINAL is long if the rfmt equals
-    // 32. sizeof(long) on 64bit machines is 8.
     unsigned long* raw_data = 0;
-    long nr_icon_data = 0;
+    unsigned long nr_icon_data = 0;
 
     {
         Atom rtype;
@@ -107,6 +131,9 @@ void extractNetWmIcon(Atom net_wm_icon, WinClient& winclient) {
         // actually there is some data in _NET_WM_ICON
         nr_icon_data = nr_bytes_left / sizeof(CARD32);
 
+        fbdbg << "extractNetWmIcon: " << winclient.title().logical() << "\n";
+        fbdbg << "nr_icon_data: " << nr_icon_data << "\n";
+
         // read all the icons stored in _NET_WM_ICON
         if (raw_data)
             XFree(raw_data);
@@ -118,32 +145,68 @@ void extractNetWmIcon(Atom net_wm_icon, WinClient& winclient) {
 
             return;
         }
+
+        fbdbg << "nr_read: " << nr_read << "|" << nr_bytes_left << "\n";
+
     }
 
     IconContainer icon_data; // stores all available data, sorted by size (width x height)
-    int width;
-    int height;
+    unsigned long width;
+    unsigned long height;
 
     // analyze the available icons
-    long i;
-
+    //
+    // check also for invalid values coming in from "bad" applications
+    unsigned long i;
     for (i = 0; i + 2 < nr_icon_data; i += width * height ) {
 
         width = raw_data[i++];
+        if (width >= nr_icon_data) {
+
+            fbdbg << "Ewmh.cc extractNetWmIcon found strange _NET_WM_ICON width (" 
+                  << width << ") for " << winclient.title().logical() << "\n";
+            break;
+        }
+
         height = raw_data[i++];
+        if (height >= nr_icon_data) {
+
+            fbdbg << "Ewmh.cc extractNetWmIcon found strange _NET_WM_ICON height (" 
+                  << height << ") for " << winclient.title().logical() << "\n";
+
+            break;
+        }
 
         // strange values stored in the NETWM_ICON
-        if (width <= 0 || height <= 0 || i + width * height > nr_icon_data) {
-            std::cerr << "Ewmh.cc extractNetWmIcon found strange _NET_WM_ICON dimensions for " << winclient.title() << "\n";
-            XFree(raw_data);
-            return;
+        if (i + width * height > nr_icon_data) {
+            fbdbg << "Ewmh.cc extractNetWmIcon found strange _NET_WM_ICON dimensions (" 
+
+                  << width << "x" << height << ")for " << winclient.title().logical() << "\n";
+
+            break;
         }
 
         icon_data[Size(width, height)] = &raw_data[i];
     }
 
+    // no valid icons found at all
+    if (icon_data.empty()) {
+        XFree(raw_data);
+        return;
+    }
+
     Display* dpy = FbTk::App::instance()->display();
     int scrn = winclient.screen().screenNumber();
+
+    // the icon will not be used by the client but by
+    // 'menu', 'iconbar', 'titlebar'. all these entities
+    // are created based upon the rootwindow and
+    // the default depth. if we would use winclient.depth()
+    // and winclient.drawable() here we might get into trouble
+    // (xfce4-terminal, skype .. 32bit visuals vs 24bit fluxbox
+    // entities)
+    Drawable parent = winclient.screen().rootWindow().drawable();
+    unsigned int depth = DefaultDepth(dpy, scrn);
 
     // pick the smallest icon size atm
     // TODO: find a better criteria
@@ -151,7 +214,7 @@ void extractNetWmIcon(Atom net_wm_icon, WinClient& winclient) {
     height = icon_data.begin()->first.second;
 
     // tmp image for the pixmap
-    XImage* img_pm = XCreateImage(dpy, DefaultVisual(dpy, scrn), winclient.depth(),
+    XImage* img_pm = XCreateImage(dpy, DefaultVisual(dpy, scrn), depth,
                                   ZPixmap,
                                   0, NULL, width, height, 32, 0);
     if (!img_pm) {
@@ -178,8 +241,8 @@ void extractNetWmIcon(Atom net_wm_icon, WinClient& winclient) {
     const unsigned long* src = icon_data.begin()->second;
     unsigned int rgba;
     unsigned long pixel;
-    int x;
-    int y;
+    unsigned long x;
+    unsigned long y;
     unsigned char r, g, b, a;
 
     for (y = 0; y < height; y++) {
@@ -227,8 +290,8 @@ void extractNetWmIcon(Atom net_wm_icon, WinClient& winclient) {
 
     // the final icon
     FbTk::PixmapWithMask icon;
-    icon.pixmap() = FbTk::FbPixmap(winclient.drawable(), width, height, winclient.depth());
-    icon.mask() = FbTk::FbPixmap(winclient.drawable(), width, height, 1);
+    icon.pixmap() = FbTk::FbPixmap(parent, width, height, depth);
+    icon.mask() = FbTk::FbPixmap(parent, width, height, 1);
 
     FbTk::GContext gc_pm(icon.pixmap());
     FbTk::GContext gc_mask(icon.mask());
@@ -244,7 +307,7 @@ void extractNetWmIcon(Atom net_wm_icon, WinClient& winclient) {
     winclient.setIcon(icon);
 }
 
-}; // end anonymous namespace
+} // end anonymous namespace
 
 class Ewmh::EwmhAtoms {
 public:
@@ -424,6 +487,7 @@ enum EwmhMoveResizeDirection {
 };
 
 Ewmh::Ewmh() {
+    setName("ewmh");
     m_net = new EwmhAtoms;
 }
 
@@ -627,14 +691,12 @@ void Ewmh::setupClient(WinClient &winclient) {
     } else if (winclient.isTransient()) {
         // if _NET_WM_WINDOW_TYPE not set and this window
         // has transient_for the type must be set to _NET_WM_WINDOW_TYPE_DIALOG
-        if (winclient.isTransient()) {
-            type = WindowState::TYPE_DIALOG;
-            winclient.
-                changeProperty(m_net->wm_window_type,
-                               XA_ATOM, 32, PropModeReplace,
-                               (unsigned char*)&m_net->wm_window_type_dialog, 1);
+        type = WindowState::TYPE_DIALOG;
+        winclient.
+            changeProperty(m_net->wm_window_type,
+                           XA_ATOM, 32, PropModeReplace,
+                           (unsigned char*)&m_net->wm_window_type_dialog, 1);
 
-        }
     }
     winclient.setWindowType(type);
 
@@ -643,22 +705,13 @@ void Ewmh::setupClient(WinClient &winclient) {
 
 void Ewmh::setupFrame(FluxboxWindow &win) {
     setupState(win);
-
-    Atom ret_type;
-    int fmt;
-    unsigned long nitems, bytes_after;
-    unsigned char *data = 0;
-
-    if (win.winClient().property(m_net->wm_desktop, 0, 1, False, XA_CARDINAL,
-                                 &ret_type, &fmt, &nitems, &bytes_after,
-                                 (unsigned char **) &data) && data) {
-        unsigned int desktop = static_cast<long>(*data);
+    bool exists;
+    unsigned int desktop=static_cast<unsigned int>(win.winClient().cardinalProperty(m_net->wm_desktop, &exists));
+    if (exists) {
         if (desktop == (unsigned int)(-1) && !win.isStuck())
             win.stick();
         else
             win.setWorkspace(desktop);
-
-        XFree(data);
     } else {
         updateWorkspace(win);
     }
@@ -778,7 +831,7 @@ void Ewmh::updateWorkspaceNames(BScreen &screen) {
     const BScreen::WorkspaceNames &workspacenames = screen.getWorkspaceNames();
     const size_t number_of_desks = workspacenames.size();
 
-    char *names[number_of_desks];
+    char** names = new char*[number_of_desks];
 
     for (size_t i = 0; i < number_of_desks; i++) {
         names[i] = new char[workspacenames[i].size() + 1]; // +1 for \0
@@ -800,13 +853,15 @@ void Ewmh::updateWorkspaceNames(BScreen &screen) {
 #else
     if (XStringListToTextProperty(names, number_of_desks, &text)) {
         XSetTextProperty(FbTk::App::instance()->display(), screen.rootWindow().window(),
-			 &text, m_net->desktop_names);
+                &text, m_net->desktop_names);
         XFree(text.value);
     }
 #endif
 
     for (size_t i = 0; i < number_of_desks; i++)
-        delete [] names[i];
+        delete[] names[i];
+
+    delete[] names;
 
 }
 
@@ -926,7 +981,7 @@ void Ewmh::updateState(FluxboxWindow &win) {
 
     updateActions(win);
 
-    typedef vector<unsigned int> StateVec;
+    typedef vector<Atom> StateVec;
 
     StateVec state;
 
@@ -938,9 +993,9 @@ void Ewmh::updateState(FluxboxWindow &win) {
         state.push_back(m_net->wm_state_sticky);
     if (win.isShaded())
         state.push_back(m_net->wm_state_shaded);
-    if (win.layerNum() == Layer::BOTTOM)
+    if (win.layerNum() == ResourceLayer::BOTTOM)
         state.push_back(m_net->wm_state_below);
-    if (win.layerNum() == Layer::ABOVE_DOCK)
+    if (win.layerNum() == ResourceLayer::ABOVE_DOCK)
         state.push_back(m_net->wm_state_above);
     if (win.isIconic())
         state.push_back(m_net->wm_state_hidden);
@@ -1135,9 +1190,9 @@ bool Ewmh::checkClientMessage(const XClientMessageEvent &ce,
             win_gravity, winclient->old_bw);
         return true;
     } else if (ce.message_type == m_net->restack_window) {
-#ifndef DEBUG
-        cerr << "Ewmh: restack window" << endl;
-#endif // DEBUG
+
+        fbdbg << "Ewmh: restack window" << endl;
+
         if (winclient == 0 || winclient->fbwindow() == 0)
             return true;
 
@@ -1151,15 +1206,15 @@ bool Ewmh::checkClientMessage(const XClientMessageEvent &ce,
             above_win == winclient) // this would be very wrong :)
             return true;
 
-        FbTk::XLayerItem &below_item = winclient->fbwindow()->layerItem();
-        FbTk::XLayerItem &above_item = above_win->fbwindow()->layerItem();
+        FbTk::LayerItem &below_item = winclient->fbwindow()->layerItem();
+        FbTk::LayerItem &above_item = above_win->fbwindow()->layerItem();
 
         // this might break the transient_for layering
 
         // do restack if both items are on the same layer
         // else ignore restack
         if (&below_item.getLayer() == &above_item.getLayer())
-            below_item.getLayer().stackBelowItem(&below_item, &above_item);
+            below_item.getLayer().stackBelowItem(below_item, &above_item);
 
 
         return true;
@@ -1239,7 +1294,7 @@ bool Ewmh::propertyNotify(WinClient &winclient, Atom the_property) {
         if (!newtitle.empty())
             winclient.setTitle(newtitle);
         if (winclient.fbwindow())
-            winclient.fbwindow()->titleSig().notify();
+            winclient.fbwindow()->titleSig().emit(newtitle, *winclient.fbwindow());
         return true;
     } else if (the_property == m_net->wm_icon_name) {
         // we don't use icon title, since we don't show icons
@@ -1292,20 +1347,19 @@ void Ewmh::setState(FluxboxWindow &win, Atom state, bool value,
         win.setIconHidden(value);
     } else if (state == m_net->wm_state_below) {  // bottom layer
         if (value)
-            win.moveToLayer(Layer::BOTTOM);
-        else if (win.layerNum() > Layer::NORMAL)
-            win.moveToLayer(Layer::NORMAL);
+            win.moveToLayer(ResourceLayer::BOTTOM);
+        else if (win.layerNum() > ResourceLayer::NORMAL)
+            win.moveToLayer(ResourceLayer::NORMAL);
     } else if (state == m_net->wm_state_above) { // above layer
         if (value)
-            win.moveToLayer(Layer::ABOVE_DOCK);
-        else if (win.layerNum() < Layer::NORMAL)
-            win.moveToLayer(Layer::NORMAL);
+            win.moveToLayer(ResourceLayer::ABOVE_DOCK);
+        else if (win.layerNum() < ResourceLayer::NORMAL)
+            win.moveToLayer(ResourceLayer::NORMAL);
     } else if (state == m_net->wm_state_demands_attention) {
         if (value) { // if add attention
             Fluxbox::instance()->attentionHandler().addAttention(client);
         } else { // erase it
-            Fluxbox::instance()->attentionHandler().
-                update(&client.focusSig());
+            Fluxbox::instance()->attentionHandler().removeWindow(client);
         }
     } else if (state == m_net->wm_state_modal) {
         client.setStateModal(value);
@@ -1333,16 +1387,16 @@ void Ewmh::toggleState(FluxboxWindow &win, Atom state, WinClient &client) {
     } else if (state == m_net->wm_state_skip_taskbar) { // taskbar
         win.setIconHidden(!win.isIconHidden());
     } else if (state == m_net->wm_state_below) { // bottom layer
-        if (win.layerNum() == Layer::BOTTOM)
-            win.moveToLayer(Layer::NORMAL);
+        if (win.layerNum() == ResourceLayer::BOTTOM)
+            win.moveToLayer(ResourceLayer::NORMAL);
         else
-            win.moveToLayer(Layer::BOTTOM);
+            win.moveToLayer(ResourceLayer::BOTTOM);
 
     } else if (state == m_net->wm_state_above) { // top layer
-        if (win.layerNum() == Layer::ABOVE_DOCK)
-            win.moveToLayer(Layer::NORMAL);
+        if (win.layerNum() == ResourceLayer::ABOVE_DOCK)
+            win.moveToLayer(ResourceLayer::NORMAL);
         else
-            win.moveToLayer(Layer::ABOVE_DOCK);
+            win.moveToLayer(ResourceLayer::ABOVE_DOCK);
     } else if (state == m_net->wm_state_modal) { // modal
         client.setStateModal(!client.isStateModal());
     }
@@ -1491,3 +1545,4 @@ void Ewmh::updateFrameExtents(FluxboxWindow &win) {
                               (unsigned char *)extents, 4);
     }
 }
+

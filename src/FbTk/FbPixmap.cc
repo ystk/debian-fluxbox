@@ -29,6 +29,7 @@
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
 #include <iostream>
+#include <vector>
 #ifdef HAVE_CSTRING
   #include <cstring>
 #else
@@ -41,32 +42,29 @@ namespace FbTk {
 
 namespace {
 
-Pixmap *root_pixmaps = 0;
+std::vector <Pixmap> s_root_pixmaps;
 
-const char* root_prop_ids[] = {
-    "_XROOTPMAP_ID",
-    "_XSETROOT_ID",
-    0
+struct RootProps {
+    const char* name;
+    Atom atom;
 };
 
-// same number as in root_prop_ids
-Atom root_prop_atoms[] = {
-    None,
-    None,
-    None
+struct RootProps root_props[] = {
+    { "_XROOTPMAP_ID", None },
+    { "_XSETROOT_ID", None }
 };
 
 void checkAtoms() {
 
     Display* display = FbTk::App::instance()->display();
-    for (int i=0; root_prop_ids[i] != 0; ++i) {
-        if (root_prop_atoms[i] == None) {
-            root_prop_atoms[i] = XInternAtom(display, root_prop_ids[i], False);
+    for (size_t i = 0; i < sizeof(root_props)/sizeof(RootProps); ++i) {
+        if (root_props[i].atom == None) {
+            root_props[i].atom = XInternAtom(display, root_props[i].name, False);
         }
     }
 }
 
-}; // end of anonymous namespace
+} // end of anonymous namespace
 
 FbPixmap::FbPixmap():m_pm(0),
                      m_width(0), m_height(0),
@@ -221,61 +219,70 @@ void FbPixmap::rotate(FbTk::Orientation orient) {
     unsigned int neww = oldw, newh = oldh;
     translateSize(orient, neww, newh);
 
+    // reverse height/width for new pixmap
+    FbPixmap new_pm(drawable(), neww, newh, depth());
+
+    // width|height could be 0. this happens (for example) if
+    // the systemtray-tool is ROT90. in that case 'src_image'
+    // becomes NULL and caused a SIGSEV upon XDestroyImage()
+    // TODO: catch dimensions with '0' earlier?
+    //
     // make an image copy
     XImage *src_image = XGetImage(display(), drawable(),
                                   0, 0, // pos
                                   oldw, oldh, // size
                                   ~0, // plane mask
                                   ZPixmap); // format
-    // reverse height/width for new pixmap
-    FbPixmap new_pm(drawable(), neww, newh, depth());
+    if (src_image) {
 
-    GContext gc(drawable());
+        GContext gc(drawable());
 
-    if (orient == ROT180) {
-        unsigned int srcx, srcy, destx, desty;
-        for (srcy = 0, desty = oldh; srcy < oldh; ++srcy, --desty) {
-            for (srcx = 0, destx = oldw; srcx < oldw; ++srcx, --destx) {
-                gc.setForeground(XGetPixel(src_image, srcx, srcy));
-                XDrawPoint(display(), new_pm.drawable(), gc.gc(), destx, desty);
+        if (orient == ROT180) {
+            unsigned int srcx, srcy, destx, desty;
+            for (srcy = 0, desty = oldh; srcy < oldh; ++srcy, --desty) {
+                for (srcx = 0, destx = oldw; srcx < oldw; ++srcx, --destx) {
+                    gc.setForeground(XGetPixel(src_image, srcx, srcy));
+                    XDrawPoint(display(), new_pm.drawable(), gc.gc(), destx, desty);
+                }
+            }
+        } else {
+            // need to flip x and y
+
+            // set start, end and direction based on rotation
+            // NOTE that startx etc are in the direction of the OLD pixmap
+            unsigned int startx = 0, starty = 0;
+            int dirx = 0, diry = 0;
+            switch (orient) {
+            case ROT90:
+                startx = neww-1;
+                starty = 0;
+                dirx = -1;
+                diry = 1;
+                break;
+            case ROT270:
+                startx = 0;
+                starty = newh-1;
+                dirx = 1;
+                diry = -1;
+                break;
+            default: // kill warning
+                break;
+            }
+
+
+            // copy new area
+            unsigned int srcx, srcy, destx, desty;
+            for (srcy = 0, destx = startx; srcy < oldh; ++srcy, destx+=dirx) {
+                for (srcx = 0, desty = starty; srcx < oldw; ++srcx, desty+=diry) {
+                    gc.setForeground(XGetPixel(src_image, srcx, srcy));
+                    XDrawPoint(display(), new_pm.drawable(), gc.gc(), destx, desty);
+                }
             }
         }
-    } else {
-        // need to flip x and y
 
-        // set start, end and direction based on rotation
-        // NOTE that startx etc are in the direction of the OLD pixmap
-        unsigned int startx = 0, starty = 0;
-        int dirx = 0, diry = 0;
-        switch (orient) {
-        case ROT90:
-            startx = neww-1;
-            starty = 0;
-            dirx = -1;
-            diry = 1;
-            break;
-        case ROT270:
-            startx = 0;
-            starty = newh-1;
-            dirx = 1;
-            diry = -1;
-            break;
-        default: // kill warning
-            break;
-        }
-
-
-        // copy new area
-        unsigned int srcx, srcy, destx, desty;
-        for (srcy = 0, destx = startx; srcy < oldh; ++srcy, destx+=dirx) {
-            for (srcx = 0, desty = starty; srcx < oldw; ++srcx, desty+=diry) {
-                gc.setForeground(XGetPixel(src_image, srcx, srcy));
-                XDrawPoint(display(), new_pm.drawable(), gc.gc(), destx, desty);
-            }
-        }
+        XDestroyImage(src_image);
     }
 
-    XDestroyImage(src_image);
     // free old pixmap and set new from new_pm
     free();
 
@@ -372,8 +379,8 @@ bool FbPixmap::rootwinPropertyNotify(int screen_num, Atom atom) {
         return false;
 
     checkAtoms();
-    for (int i=0; root_prop_ids[i] != 0; ++i) {
-        if (root_prop_atoms[i] == atom) {
+    for (size_t i = 0; i < sizeof(root_props)/sizeof(RootProps); ++i) {
+        if (root_props[i].atom == atom) {
             Pixmap root_pm = None;
             Atom real_type;
             int real_format;
@@ -382,7 +389,7 @@ bool FbPixmap::rootwinPropertyNotify(int screen_num, Atom atom) {
 
             if (XGetWindowProperty(display(),
                                    RootWindow(display(), screen_num),
-                                   root_prop_atoms[i],
+                                   root_props[i].atom,
                                    0l, 1l,
                                    False, XA_PIXMAP,
                                    &real_type, &real_format,
@@ -403,14 +410,15 @@ bool FbPixmap::rootwinPropertyNotify(int screen_num, Atom atom) {
 
 // returns whether or not the background was changed
 bool FbPixmap::setRootPixmap(int screen_num, Pixmap pm) {
-    if (!root_pixmaps) {
-        root_pixmaps = new Pixmap[ScreenCount(display())];
-        for (int i=0; i < ScreenCount(display()); ++i)
-            root_pixmaps[i] = None;
+
+    if (s_root_pixmaps.empty()) {
+        int i;
+        for (i = 0; i < ScreenCount(display()); ++i)
+            s_root_pixmaps.push_back(None);
     }
 
-    if (root_pixmaps[screen_num] != pm) {
-        root_pixmaps[screen_num] = pm;
+    if (s_root_pixmaps[screen_num] != pm) {
+        s_root_pixmaps[screen_num] = pm;
         FbWindow::updatedAlphaBackground(screen_num);
         return true;
     }
@@ -424,8 +432,10 @@ Pixmap FbPixmap::getRootPixmap(int screen_num, bool force_update) {
     */
 
     // check and see if if we have the pixmaps in cache
-    if (root_pixmaps && !force_update)
-        return root_pixmaps[screen_num];
+    if (!s_root_pixmaps.empty() && !force_update)
+        return s_root_pixmaps[screen_num];
+
+    checkAtoms();
 
     // else setup pixmap cache
     int numscreens = ScreenCount(display());
@@ -435,32 +445,31 @@ Pixmap FbPixmap::getRootPixmap(int screen_num, bool force_update) {
         unsigned long items_read, items_left;
         unsigned long *data;
 
-        unsigned int prop = 0;
-
         static bool print_error = true; // print error_message only once
-        static const char* error_message = {
-            "\n\n !!! WARNING WARNING WARNING WARNING !!!!!\n"
-            "   if you experience problems with transparency:\n"
-            "   you are using a wallpapersetter that \n"
-            "   uses _XSETROOT_ID .. which we do not support.\n"
-            "   consult 'fbsetbg -i' or try any other wallpapersetter\n"
-            "   that uses _XROOTPMAP_ID !\n"
-            " !!! WARNING WARNING WARNING WARNING !!!!!!\n\n"
-        };
 
         Pixmap root_pm = None;
-        for (prop = 0; root_prop_ids[prop]; prop++) {
-            checkAtoms();
+
+        unsigned int prop = 0;
+        for (prop = 0; prop < sizeof(root_props)/sizeof(RootProps); ++prop) {
             if (XGetWindowProperty(display(),
                                    RootWindow(display(), i),
-                                   root_prop_atoms[prop],
+                                   root_props[prop].atom,
                                    0l, 1l,
                                    False, XA_PIXMAP,
                                    &real_type, &real_format,
                                    &items_read, &items_left,
                                    (unsigned char **) &data) == Success) {
                 if (real_format == 32 && items_read == 1) {
-                    if (print_error && strcmp(root_prop_ids[prop], "_XSETROOT_ID") == 0) {
+                    if (print_error && strcmp(root_props[prop].name, "_XSETROOT_ID") == 0) {
+                        static const char* error_message = {
+                            "\n\n !!! WARNING WARNING WARNING WARNING !!!!!\n"
+                            "   if you experience problems with transparency:\n"
+                            "   you are using a wallpapersetter that \n"
+                            "   uses _XSETROOT_ID .. which we do not support.\n"
+                            "   consult 'fbsetbg -i' or try any other wallpapersetter\n"
+                            "   that uses _XROOTPMAP_ID !\n"
+                            " !!! WARNING WARNING WARNING WARNING !!!!!!\n\n"
+                        };
                         cerr<<error_message;
                         print_error = false;
                     } else
@@ -474,7 +483,7 @@ Pixmap FbPixmap::getRootPixmap(int screen_num, bool force_update) {
         setRootPixmap(i, root_pm);
     }
 
-    return root_pixmaps[screen_num];
+    return s_root_pixmaps[screen_num];
 }
 
 void FbPixmap::free() {
@@ -507,3 +516,4 @@ void FbPixmap::create(Drawable src,
 }
 
 } // end namespace FbTk
+

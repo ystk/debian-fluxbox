@@ -31,10 +31,6 @@
 #include "FbTk/EventManager.hh"
 #include "FbTk/ImageControl.hh"
 #include "FbTk/TextUtils.hh"
-#include "FbTk/MacroCommand.hh"
-#include "FbTk/Menu.hh"
-#include "FbTk/RefCount.hh"
-#include "FbTk/SimpleCommand.hh"
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -59,14 +55,19 @@ IconButton::IconButton(const FbTk::FbWindow &parent,
     m_theme(win, focused_theme, unfocused_theme),
     m_pm(win.screen().imageControl()) {
 
-    m_win.titleSig().attach(this);
-    m_win.focusSig().attach(this);
-    m_win.attentionSig().attach(this);
+    m_signals.join(m_win.titleSig(),
+                   MemFunIgnoreArgs(*this, &IconButton::clientTitleChanged));
+
+    m_signals.join(m_win.focusSig(),
+                   MemFunIgnoreArgs(*this, &IconButton::reconfigAndClear));
+
+    m_signals.join(m_win.attentionSig(),
+                   MemFunIgnoreArgs(*this, &IconButton::reconfigAndClear));
 
     FbTk::EventManager::instance()->add(*this, m_icon_window);
 
     reconfigTheme();
-    update(0);
+    refreshEverything(false);
 }
 
 IconButton::~IconButton() {
@@ -100,7 +101,8 @@ void IconButton::moveResize(int x, int y,
 
     if (m_icon_window.width() != FbTk::Button::width() ||
         m_icon_window.height() != FbTk::Button::height()) {
-        update(0); // update icon window
+        reconfigTheme();
+        refreshEverything(false); // update icon window
     }
 }
 
@@ -108,7 +110,8 @@ void IconButton::resize(unsigned int width, unsigned int height) {
     FbTk::TextButton::resize(width, height);
     if (m_icon_window.width() != FbTk::Button::width() ||
         m_icon_window.height() != FbTk::Button::height()) {
-        update(0); // update icon window
+        reconfigTheme();
+        refreshEverything(false); // update icon window
     }
 }
 
@@ -119,6 +122,8 @@ void IconButton::showTooltip() {
 
     if (FbTk::TextButton::textExceeds(xoffset))
         m_win.screen().showTooltip(m_win.title());
+    else
+        m_win.screen().hideTooltip();
 }
 
 void IconButton::clear() {
@@ -135,7 +140,7 @@ void IconButton::clearArea(int x, int y,
 void IconButton::setPixmap(bool use) {
     if (m_use_pixmap != use) {
         m_use_pixmap = use;
-        update(0);
+        refreshEverything(false);
     }
 }
 
@@ -165,17 +170,12 @@ void IconButton::reconfigTheme() {
 
 }
 
-void IconButton::update(FbTk::Subject *subj) {
-    // if the window's focus state changed, we need to update the background
-    if (subj == &m_win.focusSig() || subj == &m_win.attentionSig()) {
-        reconfigTheme();
-        clear();
-        return;
-    }
+void IconButton::reconfigAndClear() {
+    reconfigTheme();
+    clear();
+}
 
-    // we got signal that either title or
-    // icon pixmap was updated,
-    // so we refresh everything
+void IconButton::refreshEverything(bool setup) {
 
     Display *display = FbTk::App::instance()->display();
     int screen = m_win.screen().screenNumber();
@@ -186,8 +186,10 @@ void IconButton::update(FbTk::Subject *subj) {
         unsigned int w = width();
         unsigned int h = height();
         FbTk::translateSize(orientation(), w, h);
-        int iconx = 1, icony = 1;
-        unsigned int neww = w, newh = h;
+        int iconx = 1;
+        int icony = 1;
+        unsigned int neww;
+        unsigned int newh = h;
         if (newh > 2*static_cast<unsigned>(icony))
             newh -= 2*icony;
         else
@@ -233,20 +235,20 @@ void IconButton::update(FbTk::Subject *subj) {
 
 #endif // SHAPE
 
-    if (subj != 0) {
+    if (setup) {
         setupWindow();
     } else {
         m_icon_window.clear();
     }
-    // if the title was changed AND the tooltip window is visible AND
-    // we have had an enter notify event ( without the leave notify )
-    // update the text inside it
-    if (subj == &m_win.titleSig() &&
-        m_has_tooltip &&
-        m_win.screen().tooltipWindow().isVisible()) {
-        m_win.screen().tooltipWindow().updateText(m_win.title());
-    }
 
+
+}
+
+void IconButton::clientTitleChanged() {
+    refreshEverything(true);
+
+    if (m_has_tooltip)
+        showTooltip();
 }
 
 void IconButton::setupWindow() {

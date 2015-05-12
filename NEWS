@@ -1,14 +1,5 @@
-News in 1.1.1:
-    * Opaque moving is now default.
-    * Faster workspace changing.
-Bug fixes:
-    * Install issues.
-    * Maximize/Fullscreen for windows with non-northwest gravity.
-    * Randr < 1.2 checks.
-    * Workaround for badly specified _NET_WM_ICONS.
-    * Fixed unshade crash.
-    * Minor pixmap resource leak.
+Version 1.3.5 is a bug fix release.
 
-See ChangeLog for more details.
-
+Critical Bugfixes in 1.3.5:
+    * Reenabled 'If' 'Or' 'And' actions again
 

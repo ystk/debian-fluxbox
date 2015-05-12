@@ -29,19 +29,27 @@
 #include "FbTk/Transparent.hh"
 #include "FbTk/CompareEqual.hh"
 #include "FbTk/TextUtils.hh"
+#include "FbTk/STLUtil.hh"
 
 #include "FbWinFrameTheme.hh"
 #include "Screen.hh"
 #include "FocusableTheme.hh"
 #include "IconButton.hh"
+#include "RectangleUtil.hh"
 
 #include <algorithm>
 #include <X11/X.h>
 
+#include "Keys.hh"
+
+using std::max;
 using std::mem_fun;
 using std::string;
 
-FbWinFrame::FbWinFrame(BScreen &screen, WindowState &state,
+using FbTk::STLUtil::forAll;
+
+FbWinFrame::FbWinFrame(BScreen &screen, unsigned int client_depth,
+                       WindowState &state,
                        FocusableTheme<FbWinFrameTheme> &theme):
     m_screen(screen),
     m_theme(theme),
@@ -50,26 +58,41 @@ FbWinFrame::FbWinFrame(BScreen &screen, WindowState &state,
     m_window(theme->screenNum(), state.x, state.y, state.width, state.height,
              ButtonPressMask | ButtonReleaseMask |
              ButtonMotionMask | EnterWindowMask |
-             LeaveWindowMask, true),
-    m_layeritem(window(), *screen.layerManager().getLayer(Layer::NORMAL)),
+             LeaveWindowMask, true, false,
+             client_depth, InputOutput,
+             ((client_depth == 32) && (screen.rootWindow().depth() == 32) ? screen.rootWindow().visual() : CopyFromParent),
+             ((client_depth == 32) && (screen.rootWindow().depth() == 32) ? screen.rootWindow().colormap() : CopyFromParent)),
+    m_layeritem(window(), *screen.layerManager().getLayer(ResourceLayer::NORMAL)),
     m_titlebar(m_window, 0, 0, 100, 16,
                ButtonPressMask | ButtonReleaseMask |
                ButtonMotionMask | ExposureMask |
-               EnterWindowMask | LeaveWindowMask),
+               EnterWindowMask | LeaveWindowMask,
+               false, false, screen.rootWindow().decorationDepth(), InputOutput,
+               screen.rootWindow().decorationVisual(),
+               screen.rootWindow().decorationColormap()),
     m_tab_container(m_titlebar),
-    m_label(m_titlebar, m_theme->font(), ""),
+    m_label(m_titlebar, m_theme->font(), FbTk::BiDiString("")),
     m_handle(m_window, 0, 0, 100, 5,
              ButtonPressMask | ButtonReleaseMask |
              ButtonMotionMask | ExposureMask |
-             EnterWindowMask | LeaveWindowMask),
+             EnterWindowMask | LeaveWindowMask,
+             false, false, screen.rootWindow().decorationDepth(), InputOutput,
+             screen.rootWindow().decorationVisual(),
+             screen.rootWindow().decorationColormap()),
     m_grip_right(m_handle, 0, 0, 10, 4,
                  ButtonPressMask | ButtonReleaseMask |
                  ButtonMotionMask | ExposureMask |
-                 EnterWindowMask | LeaveWindowMask),
+                 EnterWindowMask | LeaveWindowMask,
+                 false, false, screen.rootWindow().decorationDepth(), InputOutput,
+                 screen.rootWindow().decorationVisual(),
+                 screen.rootWindow().decorationColormap()),
     m_grip_left(m_handle, 0, 0, 10, 4,
-        ButtonPressMask | ButtonReleaseMask |
-        ButtonMotionMask | ExposureMask |
-        EnterWindowMask | LeaveWindowMask),
+                ButtonPressMask | ButtonReleaseMask |
+                ButtonMotionMask | ExposureMask |
+                EnterWindowMask | LeaveWindowMask,
+                false, false, screen.rootWindow().decorationDepth(), InputOutput,
+                screen.rootWindow().decorationVisual(),
+                screen.rootWindow().decorationColormap()),
     m_clientarea(m_window, 0, 0, 100, 100,
                  ButtonPressMask | ButtonReleaseMask |
                  ButtonMotionMask | ExposureMask |
@@ -159,7 +182,7 @@ bool FbWinFrame::setTabMode(TabMode tabmode) {
 //        reconfigure();
     }
 
-    return true;
+    return ret;
 }
 
 void FbWinFrame::hide() {
@@ -423,7 +446,7 @@ void FbWinFrame::alignTabs() {
 
 void FbWinFrame::notifyMoved(bool clear) {
     // not important if no alpha...
-    unsigned char alpha = getAlpha(m_state.focused);
+    int alpha = getAlpha(m_state.focused);
     if (alpha == 255)
         return;
 
@@ -438,12 +461,8 @@ void FbWinFrame::notifyMoved(bool clear) {
 
         m_titlebar.parentMoved();
 
-        for_each(m_buttons_left.begin(),
-                 m_buttons_left.end(),
-                 mem_fun(&FbTk::Button::parentMoved));
-        for_each(m_buttons_right.begin(),
-                 m_buttons_right.end(),
-                 mem_fun(&FbTk::Button::parentMoved));
+        forAll(m_buttons_left, mem_fun(&FbTk::Button::parentMoved));
+        forAll(m_buttons_right, mem_fun(&FbTk::Button::parentMoved));
     }
 
     if (m_use_handle) {
@@ -462,13 +481,8 @@ void FbWinFrame::clearAll() {
 
     if  (m_use_titlebar) {
         redrawTitlebar();
-
-        for_each(m_buttons_left.begin(),
-                 m_buttons_left.end(),
-                 mem_fun(&FbTk::Button::clear));
-        for_each(m_buttons_right.begin(),
-                 m_buttons_right.end(),
-                 mem_fun(&FbTk::Button::clear));
+        forAll(m_buttons_left, mem_fun(&FbTk::Button::clear));
+        forAll(m_buttons_right, mem_fun(&FbTk::Button::clear));
     } else if (m_tabmode == EXTERNAL && m_use_tabs)
         m_tab_container.clear();
 
@@ -487,7 +501,7 @@ void FbWinFrame::setFocus(bool newvalue) {
 
     if (FbTk::Transparent::haveRender() && 
         getAlpha(true) != getAlpha(false)) { // different alpha for focused and unfocused
-        unsigned char alpha = getAlpha(m_state.focused);
+        int alpha = getAlpha(m_state.focused);
         if (FbTk::Transparent::haveComposite()) {
             m_tab_container.setAlpha(255);
             m_window.setOpaque(alpha);
@@ -538,10 +552,10 @@ void FbWinFrame::applyState() {
     }
 
     moveResize(new_x, new_y, new_w, new_h);
-    frameExtentSig().notify();
+    frameExtentSig().emit();
 }
 
-void FbWinFrame::setAlpha(bool focused, unsigned char alpha) {
+void FbWinFrame::setAlpha(bool focused, int alpha) {
     if (focused)
         m_focused_alpha = alpha;
     else
@@ -552,7 +566,7 @@ void FbWinFrame::setAlpha(bool focused, unsigned char alpha) {
 }
 
 void FbWinFrame::applyAlpha() {
-    unsigned char alpha = getAlpha(m_state.focused);
+    int alpha = getAlpha(m_state.focused);
     if (FbTk::Transparent::haveComposite())
         m_window.setOpaque(alpha);
     else {
@@ -562,8 +576,11 @@ void FbWinFrame::applyAlpha() {
     }
 }
 
-unsigned char FbWinFrame::getAlpha(bool focused) const {
-  return focused ? m_focused_alpha : m_unfocused_alpha;
+int FbWinFrame::getAlpha(bool focused) const {
+    if (focused)
+        return m_focused_alpha;
+    else
+        return m_unfocused_alpha;
 }
 
 void FbWinFrame::setDefaultAlpha() {
@@ -597,16 +614,9 @@ void FbWinFrame::addRightButton(FbTk::Button *btn) {
 }
 
 void FbWinFrame::removeAllButtons() {
-    // destroy left side
-    while (!m_buttons_left.empty()) {
-        delete m_buttons_left.back();
-        m_buttons_left.pop_back();
-    }
-    // destroy right side
-    while (!m_buttons_right.empty()) {
-        delete m_buttons_right.back();
-        m_buttons_right.pop_back();
-    }
+
+    FbTk::STLUtil::destroyAndClear(m_buttons_left);
+    FbTk::STLUtil::destroyAndClear(m_buttons_right);
 }
 
 void FbWinFrame::createTab(FbTk::Button &button) {
@@ -663,12 +673,6 @@ void FbWinFrame::moveLabelButtonRightOf(FbTk::TextButton &btn, const FbTk::TextB
         movement+=1;
 
     m_tab_container.moveItem(&btn, movement);
-}
-
-void FbWinFrame::setLabelButtonFocus(IconButton &btn) {
-    if (btn.parent() != &m_tab_container)
-        return;
-    m_label.setText(btn.text());
 }
 
 void FbWinFrame::setClientWindow(FbTk::FbWindow &win) {
@@ -984,8 +988,7 @@ void FbWinFrame::reconfigure() {
     if (isVisible()) {
         // update transparency settings
         if (FbTk::Transparent::haveRender()) {
-            unsigned char alpha =
-                getAlpha(m_state.focused);
+            int alpha = getAlpha(m_state.focused);
             if (FbTk::Transparent::haveComposite()) {
                 m_tab_container.setAlpha(255);
                 m_window.setOpaque(alpha);
@@ -1186,7 +1189,7 @@ void FbWinFrame::applyTitlebar() {
     getCurrentFocusPixmap(label_pm, title_pm,
                           label_color, title_color);
 
-    unsigned char alpha = getAlpha (m_state.focused);
+    int alpha = getAlpha (m_state.focused);
     m_titlebar.setAlpha(alpha);
     m_label.setAlpha(alpha);
 
@@ -1238,7 +1241,7 @@ void FbWinFrame::renderHandles() {
 
 void FbWinFrame::applyHandles() {
 
-    unsigned char alpha = getAlpha(m_state.focused);
+    int alpha = getAlpha(m_state.focused);
     m_handle.setAlpha(alpha);
     m_grip_left.setAlpha(alpha);
     m_grip_right.setAlpha(alpha);
@@ -1489,10 +1492,12 @@ void FbWinFrame::applyDecorations(bool do_move) {
         client_move = true;
     }
 
-    if (do_move)
+    if (do_move) {
         reconfigure();
+        m_state.saveGeometry(x(), y(), width(), height());
+    }
     if (client_move)
-        frameExtentSig().notify();
+        frameExtentSig().emit();
 }
 
 bool FbWinFrame::setBorderWidth(bool do_move) {
@@ -1543,7 +1548,7 @@ bool FbWinFrame::setBorderWidth(bool do_move) {
         alignTabs();
 
     if (do_move) {
-        frameExtentSig().notify();
+        frameExtentSig().emit();
         gravityTranslate(grav_x, grav_y, sizeHints().win_gravity,
                          m_active_orig_client_bw, false);
         // if the location changes, shift it
@@ -1706,7 +1711,8 @@ int FbWinFrame::yOffset() const {
 
 void FbWinFrame::applySizeHints(unsigned int &width, unsigned int &height,
                                 bool maximizing) const {
-    height -= titlebarHeight() + handleHeight();
+    const int h = height - titlebarHeight() - handleHeight();
+    height = max(h, static_cast<int>(titlebarHeight() + handleHeight()));
     sizeHints().apply(width, height, maximizing);
     height += titlebarHeight() + handleHeight();
 }
@@ -1723,4 +1729,50 @@ bool FbWinFrame::insideTitlebar(Window win) const {
         gripLeft().window() != win &&
         gripRight().window() != win &&
         window().window() != win;
+}
+
+int FbWinFrame::getContext(Window win, int x, int y, int last_x, int last_y, bool doBorders) {
+    int context = 0;
+    if (gripLeft().window()  == win) return Keys::ON_LEFTGRIP;
+    if (gripRight().window() == win) return Keys::ON_RIGHTGRIP;
+    if (doBorders) {
+        using RectangleUtil::insideBorder;
+        int borderw = window().borderWidth();
+        if ( // if mouse is currently on the window border, ignore it
+                (
+                    ! insideBorder(window(), x, y, borderw) 
+                    && ( externalTabMode() 
+                        || ! insideBorder(tabcontainer(), x, y, borderw) )
+                )
+                || // or if mouse was on border when it was last clicked
+                (
+                    ! insideBorder(window(), last_x, last_y, borderw) 
+                    && ( externalTabMode() 
+                        || ! insideBorder(tabcontainer(), last_x, last_y, borderw ) )
+                )
+           ) context = Keys::ON_WINDOWBORDER;
+    }
+
+    if (window().window()    == win) return context | Keys::ON_WINDOW;
+    // /!\ old code: handle = titlebar in motionNotifyEvent but only there !
+    // handle() as border ??
+    if (handle().window()    == win) return Keys::ON_WINDOWBORDER | Keys::ON_WINDOW;
+    if (titlebar().window()  == win) return context | Keys::ON_TITLEBAR;
+    if (label().window()     == win) return context | Keys::ON_TITLEBAR;
+    // internal tabs are on title bar
+    if (tabcontainer().window() == win)
+        return context | Keys::ON_TAB | (externalTabMode()?0:Keys::ON_TITLEBAR);
+
+
+    FbTk::Container::ItemList::iterator it = tabcontainer().begin();
+    FbTk::Container::ItemList::iterator it_end = tabcontainer().end();
+    for (; it != it_end; ++it) {
+        if ((*it)->window() == win)
+            break;
+    }
+    // internal tabs are on title bar
+    if (it != it_end)
+        return context | Keys::ON_TAB | (externalTabMode()?0:Keys::ON_TITLEBAR);
+
+    return context;
 }

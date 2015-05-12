@@ -23,6 +23,7 @@
 #define KEYS_HH
 
 #include "FbTk/NotCopyable.hh"
+#include "FbTk/RefCount.hh"
 
 #include <X11/Xlib.h>
 #include <string>
@@ -42,14 +43,17 @@ public:
     // it's ok if there is overlap; it will be worked out in t_key::find()
     // eventHandlers should submit bitwise-or of contexts the event happened in
     enum {
-        GLOBAL = 0x01,
-        ON_DESKTOP = 0x02,
-        ON_TOOLBAR = 0x04,
-        ON_ICONBUTTON = 0x08,
-        ON_TITLEBAR = 0x10,
-        ON_WINDOW = 0x20,
-        ON_TAB = 0x40,
-        ON_SLIT = 0x80
+        GLOBAL =            1 << 0,
+        ON_DESKTOP =        1 << 1,
+        ON_TOOLBAR =        1 << 2,
+        ON_ICONBUTTON =     1 << 3,
+        ON_TITLEBAR =       1 << 4,
+        ON_WINDOW =         1 << 5,
+        ON_WINDOWBORDER =   1 << 6,
+        ON_LEFTGRIP =       1 << 7,
+        ON_RIGHTGRIP =      1 << 8,
+        ON_TAB =            1 << 9,
+        ON_SLIT =           1 << 10
         // and so on...
     };
 
@@ -73,6 +77,9 @@ public:
     /// unregister window
     void unregisterWindow(Window win);
 
+    /// grab keys again when keymap changes
+    void regrab();
+
     const std::string& filename() const { return m_filename; }
     /**
        Load configuration from file
@@ -83,9 +90,13 @@ public:
     */
     void reconfigure();
     void keyMode(const std::string& keyMode);
+
+    bool inKeychain() const { return saved_keymode != 0; }
+
 private:
     class t_key; // helper class to build a 'keytree'
-    typedef std::map<std::string, t_key *> keyspace_t;
+    typedef FbTk::RefCount<t_key> RefKey;
+    typedef std::map<std::string, RefKey> keyspace_t;
     typedef std::map<Window, int> WindowMap;
     typedef std::map<Window, FbTk::EventHandler*> HandlerMap;
 
@@ -99,17 +110,17 @@ private:
 
     // Load default keybindings for when there are errors loading the keys file
     void loadDefaults();
-    void setKeyMode(t_key *keyMode);
+    void setKeyMode(const FbTk::RefCount<t_key> &keyMode);
 
 
     // member variables
     std::string m_filename;
     FbTk::AutoReloadHelper* m_reloader;
-    t_key *m_keylist;
+    RefKey m_keylist;
     keyspace_t m_map;
 
-    // former doAction static var, we need to access it from deleteTree
-    t_key *next_key;
+    RefKey next_key;
+    RefKey saved_keymode;
 
     WindowMap m_window_map;
     HandlerMap m_handler_map;

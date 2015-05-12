@@ -38,87 +38,175 @@
   #include <stdlib.h>
 #endif
 
-#include <stdio.h>
+#ifdef HAVE_CSTDIO
+  #include <cstdio>
+#else
+  #include <stdio.h>
+#endif
 
 #include <langinfo.h>
 #include <locale.h>
 
 #include <iostream>
+#include <vector>
 
-using std::string;
+#ifndef HAVE_ICONV
+typedef int iconv_t;
+#endif // HAVE_ICONV
+
+#ifdef HAVE_FRIBIDI
+  #include <fribidi/fribidi.h>
+#endif
 
 #ifdef DEBUG
 using std::cerr;
 using std::endl;
 #endif // DEBUG
 
+namespace {
+
+const iconv_t ICONV_NULL = (iconv_t)(-1);
+
+#ifdef HAVE_FRIBIDI
+FbTk::FbString makeVisualFromLogical(const FbTk::FbString& src) {
+
+    FriBidiCharType base = FRIBIDI_TYPE_N;
+
+    // reuse allocated memory for reencoding / reordering
+    static std::vector<FriBidiChar> us;
+    static std::vector<FriBidiChar> out_us;
+    static FbTk::FbString result;
+
+    const size_t S = src.size() + 1;
+    const size_t S4 = S * 4;
+
+    if (us.capacity() < S)
+        us.reserve(S);
+    if (out_us.capacity() < S)
+        out_us.reserve(S);
+    if (result.capacity() < S4)
+        result.reserve(S4);
+
+    us.resize(S);
+    FriBidiStrIndex len = fribidi_charset_to_unicode(FRIBIDI_CHAR_SET_UTF8,
+            const_cast<char*>(src.c_str()), S - 1,
+            &us[0]);
+
+    out_us.resize(S);
+    fribidi_log2vis(&us[0], len, &base, &out_us[0], NULL, NULL, NULL);
+
+    result.resize(S4);
+    len = fribidi_unicode_to_charset(FRIBIDI_CHAR_SET_UTF8, &out_us[0], len, &result[0]);
+    result.resize(len); // trim to currently used chars
+
+    return result;
+}
+
+#endif
+
+} // end of anonymous namespace
+
+
 namespace FbTk {
+
+BiDiString::BiDiString(const FbString& logical) 
+#ifdef HAVE_FRIBIDI
+    : m_visual_dirty(false)
+#endif
+{
+    if (!logical.empty())
+        setLogical(logical);
+}
+
+const FbString& BiDiString::setLogical(const FbString& logical) {
+    m_logical = logical;
+#if HAVE_FRIBIDI
+    if (m_logical.empty()) {
+        m_visual_dirty = false;
+        m_visual.clear();
+    } else {
+        m_visual_dirty = true;
+    }
+#endif
+    return m_logical;
+}
+
+const FbString& BiDiString::visual() const {
+#if HAVE_FRIBIDI
+    if (m_visual_dirty) {
+        m_visual = ::makeVisualFromLogical(logical());
+    }
+    m_visual_dirty = false;
+    return m_visual;
+#else
+    return m_logical;
+#endif
+}
+
+
 
 namespace FbStringUtil {
 
-enum ConvType { FB2X = 0, X2FB, LOCALE2FB, FB2LOCALE, CONVSIZE };
+enum ConvType {
+    FB2X = 0,
+    X2FB,
+    LOCALE2FB,
+    FB2LOCALE,
+    CONVSIZE
+};
 
-#ifdef HAVE_ICONV
-static iconv_t *iconv_convs = 0;
-#else
-static int iconv_convs[CONVSIZE];
-#endif // HAVE_ICONV
-
-static string locale_codeset;
+static bool s_inited = false;
+static iconv_t s_iconv_convs[CONVSIZE];
+static std::string s_locale_codeset;
 
 /// Initialise all of the iconv conversion descriptors
 void init() {
+
+    if (s_inited)
+        return;
+
+    s_inited = true;
     setlocale(LC_CTYPE, "");
 
 #ifdef HAVE_ICONV
-    if (iconv_convs != 0)
-        return;
-
-    iconv_convs = new iconv_t[CONVSIZE];
-
-#ifdef CODESET
-    locale_codeset = nl_langinfo(CODESET);
+#if defined(CODESET) && !defined(_WIN32)
+    s_locale_codeset = nl_langinfo(CODESET);
 #else // openbsd doesnt have this (yet?)
-    locale_codeset = "";
-    string locale = setlocale(LC_CTYPE, NULL);
+    std::string locale = setlocale(LC_CTYPE, NULL);
     size_t pos = locale.find('.');
-    if (pos != string::npos)
-        locale_codeset = locale.substr(pos+1);
+    if (pos != std::string::npos)
+        s_locale_codeset = locale.substr(pos+1);
 #endif // CODESET
 
 #ifdef DEBUG
-    cerr<<"FbTk::FbString: setup converts for local codeset = "<<locale_codeset<<endl;
+    cerr << "FbTk::FbString: setup converts for local codeset = " << s_locale_codeset << endl;
 #endif // DEBUG
 
-    iconv_convs[FB2X] = iconv_open("ISO8859-1", "UTF-8");
-    iconv_convs[X2FB] = iconv_open("UTF-8", "ISO8859-1");
-    iconv_convs[FB2LOCALE] = iconv_open(locale_codeset.c_str(), "UTF-8");
-    iconv_convs[LOCALE2FB] = iconv_open("UTF-8", locale_codeset.c_str());
+    s_iconv_convs[FB2X] = iconv_open("ISO8859-1", "UTF-8");
+    s_iconv_convs[X2FB] = iconv_open("UTF-8", "ISO8859-1");
+    s_iconv_convs[FB2LOCALE] = iconv_open(s_locale_codeset.c_str(), "UTF-8");
+    s_iconv_convs[LOCALE2FB] = iconv_open("UTF-8", s_locale_codeset.c_str());
 #else
-    for (int i=0; i < CONVSIZE; ++i)
-        iconv_convs[i] = 0;
+    memset(s_iconv_convs, 0, sizeof(s_iconv_convs));
 #endif // HAVE_ICONV
 
 }
 
 void shutdown() {
 #ifdef HAVE_ICONV
-    if (iconv_convs == 0)
-        return;
+    int i;
+    for (i = 0; i < CONVSIZE; ++i)
+        if (s_iconv_convs[i] != ICONV_NULL)
+            iconv_close(s_iconv_convs[i]);
 
-    for (int i=0; i < CONVSIZE; ++i)
-        if (iconv_convs[i] != (iconv_t)(-1))
-            iconv_close(iconv_convs[i]);
-
-    delete[] iconv_convs;
-    iconv_convs = 0;
+    memset(s_iconv_convs, 0, sizeof(s_iconv_convs));
+    s_inited = false;
 #endif // HAVE_ICONV
 }
 
 
 
 
-#ifdef HAVE_ICONV
 /**
    Recodes the text from one encoding to another
    assuming cd is correct
@@ -127,7 +215,9 @@ void shutdown() {
    @param size number of BYTES to convert
    @return the recoded string, or 0 on failure
 */
+std::string recode(iconv_t cd, const std::string &in) {
 
+#ifdef HAVE_ICONV
 /**
   --NOTE--
   In the "C" locale, this will strip any high-bit characters
@@ -135,36 +225,34 @@ void shutdown() {
   then you need to set your locale to something UTF-8, OR something
   ISO8859-1.
 */
-string recode(iconv_t cd,
-             const string &in) {
 
     // If empty message, yes this can happen, return
     if (in.empty())
         return "";
 
-    if (cd == ((iconv_t)(-1)))
+    if (cd == ICONV_NULL)
         return in; // can't convert
 
     size_t insize = in.size();
     size_t outsize = insize;
-    char * out = (char *) malloc(outsize * sizeof(char)); // need realloc
-    char * out_ptr = out;
+    std::vector<char> out(outsize);
+    char* out_ptr = &out[0];
 
     size_t inbytesleft = insize;
     size_t outbytesleft = outsize;
 
-    char * in_ptr = const_cast<char *>(in.data());
+#ifdef HAVE_CONST_ICONV
+    const char* in_ptr = in.data();
+#else
+    char* in_ptr = const_cast<char*>(in.data());
+#endif
     size_t result = (size_t)(-1);
     bool again = true;
 
     while (again) {
         again = false;
 
-#ifdef HAVE_CONST_ICONV
-        result = iconv(cd, (const char**)(&in_ptr), &inbytesleft, &out_ptr, &outbytesleft);
-#else
         result = iconv(cd, &in_ptr, &inbytesleft, &out_ptr, &outbytesleft);
-#endif  // HAVE_CONST_ICONV
 
         if (result == (size_t)(-1)) {
             switch(errno) {
@@ -178,11 +266,11 @@ string recode(iconv_t cd,
             case E2BIG:
                 // need more space!
                 outsize += insize;
-                out = (char *) realloc(out, outsize*sizeof(char));
-                if (out != NULL)
+                out.resize(outsize);
+                if (out.capacity() != outsize)
                     again = true;
                 outbytesleft += insize;
-                out_ptr = out + outsize - outbytesleft;
+                out_ptr = (&out[0] + outsize) - outbytesleft;
                 break;
             default:
                 // something else broke
@@ -193,45 +281,39 @@ string recode(iconv_t cd,
     }
 
     // copy to our return string
-    string ret;
-    ret.append(out, outsize - outbytesleft);
+    std::string ret;
+    ret.append(&out[0], outsize - outbytesleft);
 
     // reset the conversion descriptor
     iconv(cd, NULL, NULL, NULL, NULL);
 
-    if (out)
-        free(out);
-
     return ret;
-}
 #else
-string recode(int cd,
-             const string &str) {
-    return str;
-}
+    return in;
 #endif // HAVE_ICONV
-
-FbString XStrToFb(const string &src) {
-    return recode(iconv_convs[X2FB], src);
 }
 
-string FbStrToX(const FbString &src) {
-    return recode(iconv_convs[FB2X], src);
+FbString XStrToFb(const std::string &src) {
+    return recode(s_iconv_convs[X2FB], src);
+}
+
+std::string FbStrToX(const FbString &src) {
+    return recode(s_iconv_convs[FB2X], src);
 }
 
 
 /// Handle thislocale string encodings (strings coming from userspace)
-FbString LocaleStrToFb(const string &src) {
-    return recode(iconv_convs[LOCALE2FB], src);
+FbString LocaleStrToFb(const std::string &src) {
+    return recode(s_iconv_convs[LOCALE2FB], src);
 }
 
-string FbStrToLocale(const FbString &src) {
-    return recode(iconv_convs[FB2LOCALE], src);
+std::string FbStrToLocale(const FbString &src) {
+    return recode(s_iconv_convs[FB2LOCALE], src);
 }
 
 bool haveUTF8() {
 #ifdef HAVE_ICONV
-    if (iconv_convs[LOCALE2FB] != ((iconv_t)(-1)))
+    if (s_iconv_convs[LOCALE2FB] != ICONV_NULL)
         return true;
 #endif // HAVE_ICONV
 
@@ -241,37 +323,34 @@ bool haveUTF8() {
 
 } // end namespace StringUtil
 
-StringConvertor::StringConvertor(EncodingTarget target):
 #ifdef HAVE_ICONV
-    m_iconv((iconv_t)(-1)) {
+StringConvertor::StringConvertor(EncodingTarget target) : m_iconv(ICONV_NULL) {
     if (target == ToLocaleStr)
-        m_destencoding = FbStringUtil::locale_codeset;
+        m_destencoding = FbStringUtil::s_locale_codeset;
     else
         m_destencoding = "UTF-8";
 }
 #else
-     m_iconv(-1) {}
+StringConvertor::StringConvertor(EncodingTarget target) { }
 #endif
-
 
 StringConvertor::~StringConvertor() {
-#ifdef HAVE_ICONV
-    if (m_iconv != ((iconv_t)-1))
-        iconv_close(m_iconv);
-#endif
+    reset();
 }
 
-bool StringConvertor::setSource(const string &encoding) {
+bool StringConvertor::setSource(const std::string &encoding) {
 #ifdef HAVE_ICONV
-    string tempenc = encoding;
-    if (encoding == "")
-        tempenc = FbStringUtil::locale_codeset;
+    std::string tempenc = encoding.empty() ? FbStringUtil::s_locale_codeset : encoding;
+
+    if ((tempenc == m_destencoding) && (m_iconv == ICONV_NULL)) {
+        return true;
+    }
 
     iconv_t newiconv = iconv_open(m_destencoding.c_str(), tempenc.c_str());
-    if (newiconv == ((iconv_t)(-1)))
+    if (newiconv == ICONV_NULL)
         return false;
     else {
-        if (m_iconv != ((iconv_t)-1))
+        if (m_iconv != ICONV_NULL)
             iconv_close(m_iconv);
         m_iconv = newiconv;
         return true;
@@ -281,12 +360,21 @@ bool StringConvertor::setSource(const string &encoding) {
 #endif
 }
 
-string StringConvertor::recode(const string &src) {
+FbString StringConvertor::recode(const std::string &src) {
 #ifdef HAVE_ICONV
     return FbStringUtil::recode(m_iconv, src);
 #else
     return src;
 #endif
 }
+
+void StringConvertor::reset() {
+#ifdef HAVE_ICONV
+    if (m_iconv != ICONV_NULL)
+        iconv_close(m_iconv);
+    m_iconv = ICONV_NULL;
+#endif
+}
+
 
 } // end namespace FbTk

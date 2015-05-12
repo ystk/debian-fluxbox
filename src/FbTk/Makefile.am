@@ -15,7 +15,9 @@ if IMLIB2
 imlib2_SOURCE= ImageImlib2.hh ImageImlib2.cc
 endif
 
-libFbTk_a_SOURCES = App.hh App.cc Color.cc Color.hh Command.hh \
+libFbTk_a_SOURCES = App.hh App.cc \
+	Color.cc Color.hh Command.hh \
+	ColorLUT.cc ColorLUT.hh \
 	Accessor.hh DefaultValue.hh \
 	FileUtil.hh FileUtil.cc \
 	EventHandler.hh EventManager.hh EventManager.cc \
@@ -36,17 +38,17 @@ libFbTk_a_SOURCES = App.hh App.cc Color.cc Color.hh Command.hh \
 	Texture.cc Texture.hh TextureRender.hh TextureRender.cc \
 	Shape.hh Shape.cc \
 	Theme.hh Theme.cc ThemeItems.cc Timer.hh Timer.cc \
+	FbTime.cc FbTime.hh \
 	XFontImp.cc XFontImp.hh \
 	Button.hh Button.cc \
 	TextButton.hh TextButton.cc \
 	Container.hh Container.cc \
-	Layer.hh LayerItem.hh MultLayers.cc MultLayers.hh \
-	XLayer.cc XLayer.hh XLayerItem.cc XLayerItem.hh \
+	MultLayers.cc MultLayers.hh \
+	Layer.cc Layer.hh LayerItem.cc LayerItem.hh \
 	Resource.hh Resource.cc \
 	StringUtil.hh StringUtil.cc Parser.hh Parser.cc \
 	RegExp.hh RegExp.cc \
 	FbString.hh FbString.cc \
-	Subject.hh Subject.cc Observer.hh Observer.cc SimpleObserver.hh \
 	AutoReloadHelper.hh AutoReloadHelper.cc \
 	Transparent.hh Transparent.cc \
 	FbPixmap.hh FbPixmap.cc \
@@ -63,6 +65,9 @@ libFbTk_a_SOURCES = App.hh App.cc Color.cc Color.hh Command.hh \
 	TypeAhead.hh SearchResult.hh SearchResult.cc ITypeAheadable.hh \
 	Select2nd.hh STLUtil.hh \
 	CachedPixmap.hh CachedPixmap.cc \
+	Slot.hh Signal.hh MemFun.hh SelectArg.hh \
+	Util.hh \
+	RelCalcHelper.hh RelCalcHelper.cc \
 	${xpm_SOURCE} \
 	${xft_SOURCE} \
 	${xmb_SOURCE} \

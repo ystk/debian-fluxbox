@@ -34,6 +34,7 @@
 #endif // HAVE_CONFIG_H
 
 #include "Screen.hh"
+#include "ScreenPlacement.hh"
 #include "FbTk/ImageControl.hh"
 #include "FbTk/RefCount.hh"
 #include "FbTk/EventManager.hh"
@@ -41,16 +42,20 @@
 #include "FbTk/Theme.hh"
 #include "FbTk/Transparent.hh"
 #include "FbTk/MacroCommand.hh"
+#include "FbTk/MemFun.hh"
+
 #include "FbCommands.hh"
 #include "Layer.hh"
 #include "LayerMenu.hh"
-#include "FbTk/XLayer.hh"
+#include "FbTk/Layer.hh"
 #include "RootTheme.hh"
 #include "FbMenu.hh"
 
 #include "SlitTheme.hh"
 #include "SlitClient.hh"
 #include "Xutil.hh"
+#include "Debug.hh"
+
 #include "FbTk/App.hh"
 #include "FbTk/MenuSeparator.hh"
 #include "FbTk/StringUtil.hh"
@@ -80,44 +85,10 @@ using std::list;
 using std::ifstream;
 using std::ofstream;
 using std::endl;
-
-#ifdef DEBUG
-using std::cerr;
 using std::hex;
 using std::dec;
-#endif // DEBUG
 
 namespace FbTk {
-
-template<>
-void FbTk::Resource<Slit::Placement>::setFromString(const char *strval) {
-    if (strcasecmp(strval, "TopLeft")==0)
-        m_value = Slit::TOPLEFT;
-    else if (strcasecmp(strval, "LeftCenter")==0)
-        m_value = Slit::LEFTCENTER;
-    else if (strcasecmp(strval, "BottomLeft")==0)
-        m_value = Slit::BOTTOMLEFT;
-    else if (strcasecmp(strval, "TopCenter")==0)
-        m_value = Slit::TOPCENTER;
-    else if (strcasecmp(strval, "BottomCenter")==0)
-        m_value = Slit::BOTTOMCENTER;
-    else if (strcasecmp(strval, "TopRight")==0)
-        m_value = Slit::TOPRIGHT;
-    else if (strcasecmp(strval, "RightCenter")==0)
-        m_value = Slit::RIGHTCENTER;
-    else if (strcasecmp(strval, "BottomRight")==0)
-        m_value = Slit::BOTTOMRIGHT;
-    else if (strcasecmp(strval, "LeftTop")==0)
-        m_value = Slit::LEFTTOP;
-    else if (strcasecmp(strval, "LeftBottom")==0)
-        m_value = Slit::LEFTBOTTOM;
-    else if (strcasecmp(strval, "RightTop")==0)
-        m_value = Slit::RIGHTTOP;
-    else if (strcasecmp(strval, "RightBottom")==0)
-        m_value = Slit::RIGHTBOTTOM;
-    else
-        setDefaultValue();
-}
 
 template<>
 string FbTk::Resource<Slit::Placement>::getString() const {
@@ -163,19 +134,49 @@ string FbTk::Resource<Slit::Placement>::getString() const {
     return string("RightBottom");
 }
 
+template<>
+void FbTk::Resource<Slit::Placement>::setFromString(const char *strval) {
+    if (strcasecmp(strval, "TopLeft")==0)
+        m_value = Slit::TOPLEFT;
+    else if (strcasecmp(strval, "LeftCenter")==0)
+        m_value = Slit::LEFTCENTER;
+    else if (strcasecmp(strval, "BottomLeft")==0)
+        m_value = Slit::BOTTOMLEFT;
+    else if (strcasecmp(strval, "TopCenter")==0)
+        m_value = Slit::TOPCENTER;
+    else if (strcasecmp(strval, "BottomCenter")==0)
+        m_value = Slit::BOTTOMCENTER;
+    else if (strcasecmp(strval, "TopRight")==0)
+        m_value = Slit::TOPRIGHT;
+    else if (strcasecmp(strval, "RightCenter")==0)
+        m_value = Slit::RIGHTCENTER;
+    else if (strcasecmp(strval, "BottomRight")==0)
+        m_value = Slit::BOTTOMRIGHT;
+    else if (strcasecmp(strval, "LeftTop")==0)
+        m_value = Slit::LEFTTOP;
+    else if (strcasecmp(strval, "LeftBottom")==0)
+        m_value = Slit::LEFTBOTTOM;
+    else if (strcasecmp(strval, "RightTop")==0)
+        m_value = Slit::RIGHTTOP;
+    else if (strcasecmp(strval, "RightBottom")==0)
+        m_value = Slit::RIGHTBOTTOM;
+    else
+        setDefaultValue();
+}
+
 } // end namespace FbTk
 namespace {
 
 class SlitClientMenuItem: public FbTk::MenuItem{
 public:
     explicit SlitClientMenuItem(Slit& slit, SlitClient &client, FbTk::RefCount<FbTk::Command<void> > &cmd):
-        FbTk::MenuItem(client.matchName().c_str(), cmd), m_slit(slit), m_client(client) {
+        FbTk::MenuItem(client.matchName(), cmd), m_slit(slit), m_client(client) {
         setCommand(cmd);
         FbTk::MenuItem::setSelected(client.visible());
         setToggleItem(true);
         setCloseOnClick(false);
     }
-    const string &label() const {
+    const FbTk::BiDiString &label() const {
         return m_client.matchName();
     }
     bool isSelected() const {
@@ -213,20 +214,20 @@ private:
     Slit::Placement m_place;
 };
 
-}; // End anonymous namespace
+} // End anonymous namespace
 
 unsigned int Slit::s_eventmask = SubstructureRedirectMask |  ButtonPressMask |
                                  EnterWindowMask | LeaveWindowMask | ExposureMask;
 
-Slit::Slit(BScreen &scr, FbTk::XLayer &layer, const char *filename)
+Slit::Slit(BScreen &scr, FbTk::Layer &layer, const char *filename)
     : m_hidden(false), m_visible(false),
       m_screen(scr),
       m_clientlist_menu(scr.menuTheme(),
                         scr.imageControl(),
-                        *scr.layerManager().getLayer(Layer::MENU)),
+                        *scr.layerManager().getLayer(ResourceLayer::MENU)),
       m_slitmenu(scr.menuTheme(),
                  scr.imageControl(),
-                 *scr.layerManager().getLayer(Layer::MENU)),
+                 *scr.layerManager().getLayer(ResourceLayer::MENU)),
 #ifdef XINERAMA
       m_xineramaheadmenu(0),
 #endif // XINERAMA
@@ -256,16 +257,23 @@ Slit::Slit(BScreen &scr, FbTk::XLayer &layer, const char *filename)
                  scr.name() + ".slit.alpha", scr.altName() + ".Slit.Alpha"),
       m_rc_on_head(scr.resourceManager(), 0,
                    scr.name() + ".slit.onhead", scr.altName() + ".Slit.onHead"),
-      m_rc_layernum(scr.resourceManager(), Layer(Layer::DOCK),
+      m_rc_layernum(scr.resourceManager(), ResourceLayer(ResourceLayer::DOCK),
                     scr.name() + ".slit.layer", scr.altName() + ".Slit.Layer") {
 
     _FB_USES_NLS;
 
+    frame.window.setWindowRole("fluxbox-slit");
+
     // attach to theme and root window change signal
-    theme().reconfigSig().attach(this);
-    scr.resizeSig().attach(this);
-    scr.bgChangeSig().attach(this);
-    scr.reconfigureSig().attach(this); // if alpha changed (we disablethis signal when we get theme change sig)
+    join(theme().reconfigSig(), FbTk::MemFun(*this, &Slit::reconfigure));
+
+    join(scr.resizeSig(),
+         FbTk::MemFun(*this, &Slit::screenSizeChanged));
+
+    join(scr.bgChangeSig(),
+         FbTk::MemFunIgnoreArgs(*this, &Slit::reconfigure));
+
+    join(scr.reconfigureSig(), FbTk::MemFunIgnoreArgs(*this, &Slit::reconfigure));
 
     scr.addConfigMenu(_FB_XTEXT(Slit, Slit, "Slit", "The Slit"), m_slitmenu);
 
@@ -273,7 +281,7 @@ Slit::Slit(BScreen &scr, FbTk::XLayer &layer, const char *filename)
     // move the frame out of sight for a moment
     frame.window.move(-frame.window.width(), -frame.window.height());
     // setup timer
-    m_timer.setTimeout(200); // default timeout
+    m_timer.setTimeout(200L * FbTk::FbTime::IN_MILLISECONDS); // default timeout
     m_timer.fireOnce(true);
     FbTk::RefCount<FbTk::Command<void> > toggle_hidden(new FbTk::SimpleCommand<Slit>(*this, &Slit::toggleHidden));
     m_timer.setCommand(toggle_hidden);
@@ -287,12 +295,12 @@ Slit::Slit(BScreen &scr, FbTk::XLayer &layer, const char *filename)
         frame.window.setAlpha(*m_rc_alpha);
     }
 
-    m_layeritem.reset(new FbTk::XLayerItem(frame.window, layer));
+    m_layeritem.reset(new FbTk::LayerItem(frame.window, layer));
 
     m_layermenu.reset(new LayerMenu(scr.menuTheme(),
                                     scr.imageControl(),
                                     *scr.layerManager().
-                                    getLayer(Layer::MENU),
+                                    getLayer(ResourceLayer::MENU),
                                     this,
                                     true));
     m_layermenu->setLabel(_FB_XTEXT(Slit, Layer, "Slit Layer", "Title of Slit Layer Menu"));
@@ -340,44 +348,44 @@ void Slit::updateStrut() {
         return;
     }
 
-    unsigned int bw = m_slit_theme->borderWidth();
+    const unsigned int bw = m_slit_theme->borderWidth() * 2;
     int left = 0, right = 0, top = 0, bottom = 0;
     switch (placement()) {
     case TOPLEFT:
-        top = height() + 2 * bw;
+        top = height() + bw;
         break;
     case LEFTTOP:
-        left = width() + 2 * bw;
+        left = width() + bw;
         break;
     case TOPCENTER:
-        top = height() + 2 * bw;
+        top = height() + bw;
         break;
     case TOPRIGHT:
-        top = height() + 2 * bw;
+        top = height() + bw;
         break;
     case RIGHTTOP:
-        right = width() + 2 * bw;
+        right = width() + bw;
         break;
     case BOTTOMLEFT:
-        bottom = height() + 2 * bw;
+        bottom = height() + bw;
         break;
     case LEFTBOTTOM:
-        left = width() + 2 * bw;
+        left = width() + bw;
         break;
     case BOTTOMCENTER:
-        bottom = height() + 2 * bw;
+        bottom = height() + bw;
         break;
     case BOTTOMRIGHT:
-        bottom = height() + 2 * bw;
+        bottom = height() + bw;
         break;
     case RIGHTBOTTOM:
-        right = width() + 2 * bw;
+        right = width() + bw;
         break;
     case LEFTCENTER:
-        left = width() + 2 * bw;
+        left = width() + bw;
         break;
     case RIGHTCENTER:
-        right = width() + 2 * bw;
+        right = width() + bw;
         break;
     }
 
@@ -386,9 +394,9 @@ void Slit::updateStrut() {
 }
 
 void Slit::addClient(Window w) {
-#ifdef DEBUG
-    cerr<<__FILE__": addClient(w = 0x"<<hex<<w<<dec<<")"<<endl;
-#endif // DEBUG
+
+    fbdbg<<"addClient(w = 0x"<<hex<<w<<dec<<")"<<endl;
+
     // Can't add non existent window
     if (w == None)
         return;
@@ -398,14 +406,13 @@ void Slit::addClient(Window w) {
 
     // Look for slot in client list by name
     SlitClient *client = 0;
-    string match_name;
-    match_name = Xutil::getWMClassName(w);
+    FbTk::FbString match_name = Xutil::getWMClassName(w);
     SlitClients::iterator it = m_client_list.begin();
     SlitClients::iterator it_end = m_client_list.end();
     bool found_match = false;
     for (; it != it_end; ++it) {
         // If the name matches...
-        if ((*it)->matchName() == match_name) {
+        if ((*it)->matchName().logical() == match_name) {
             // Use the slot if no window is assigned
             if ((*it)->window() == None) {
                 client = (*it);
@@ -453,12 +460,9 @@ void Slit::addClient(Window w) {
     int num_return = 0;
 
     if (XGetWMProtocols(disp, w, &proto, &num_return)) {
-
         XFree((void *) proto);
-#ifdef DEBUG
     } else {
-        cerr<<"Warning: Failed to read WM Protocols. "<<endl;
-#endif // DEBUG
+        fbdbg<<"Warning: Failed to read WM Protocols. "<<endl;
     }
 
     XWindowAttributes attrib;
@@ -759,30 +763,27 @@ void Slit::reposition() {
     }
 
     int border_width = theme()->borderWidth();
-    int bevel_width = theme()->bevelWidth();
-    // make sure at leaste one pixel is visible
-    if (border_width >= bevel_width)
-        bevel_width = border_width + 1;
+    int pixel = (border_width == 0 ? 1 : 0);
     // place the slit in the appropriate place
     switch (placement()) {
     case TOPLEFT:
         frame.x = head_x;
         frame.y = head_y;
         frame.x_hidden = head_x;
-        frame.y_hidden = bevel_width - border_width - frame.height;
+        frame.y_hidden = head_y + pixel - border_width - frame.height;
         break;
 
     case LEFTTOP:
         frame.x = head_x;
         frame.y = head_y;
-        frame.x_hidden = bevel_width - border_width - frame.width;
+        frame.x_hidden = head_x + pixel - border_width - frame.width;
         frame.y_hidden = head_y;
         break;
 
     case LEFTCENTER:
         frame.x = head_x;
         frame.y = head_y + (head_h - frame.height) / 2;
-        frame.x_hidden = head_x + bevel_width - border_width - frame.width;
+        frame.x_hidden = head_x + pixel - border_width - frame.width;
         frame.y_hidden = frame.y;
         break;
 
@@ -790,13 +791,13 @@ void Slit::reposition() {
         frame.x = head_x;
         frame.y = head_y + head_h - frame.height - border_width*2;
         frame.x_hidden = head_x;
-        frame.y_hidden = head_y + head_h - bevel_width - border_width;
+        frame.y_hidden = head_y + head_h - pixel - border_width;
         break;
 
     case LEFTBOTTOM:
         frame.x = head_x;
         frame.y = head_y + head_h - frame.height - border_width*2;
-        frame.x_hidden = head_x + bevel_width - border_width - frame.width;
+        frame.x_hidden = head_x + pixel - border_width - frame.width;
         frame.y_hidden = frame.y;
         break;
 
@@ -804,34 +805,34 @@ void Slit::reposition() {
         frame.x = head_x + ((head_w - frame.width) / 2);
         frame.y = head_y;
         frame.x_hidden = frame.x;
-        frame.y_hidden = head_y + bevel_width - border_width - frame.height;
+        frame.y_hidden = head_y + pixel - border_width - frame.height;
         break;
 
     case BOTTOMCENTER:
         frame.x = head_x + ((head_w - frame.width) / 2);
         frame.y = head_y + head_h - frame.height - border_width*2;
         frame.x_hidden = frame.x;
-        frame.y_hidden = head_y + head_h - bevel_width - border_width;
+        frame.y_hidden = head_y + head_h - pixel - border_width;
         break;
 
     case TOPRIGHT:
         frame.x = head_x + head_w - frame.width - border_width*2;
         frame.y = head_y;
         frame.x_hidden = frame.x;
-        frame.y_hidden = head_y + bevel_width - border_width - frame.height;
+        frame.y_hidden = head_y + pixel - border_width - frame.height;
         break;
 
     case RIGHTTOP:
         frame.x = head_x + head_w - frame.width - border_width*2;
         frame.y = head_y;
-        frame.x_hidden = head_x + head_w - bevel_width - border_width;
+        frame.x_hidden = head_x + head_w - pixel - border_width;
         frame.y_hidden = head_y;
         break;
 
     case RIGHTCENTER:
         frame.x = head_x + head_w - frame.width - border_width*2;
         frame.y = head_y + ((head_h - frame.height) / 2);
-        frame.x_hidden = head_x + head_w - bevel_width - border_width;
+        frame.x_hidden = head_x + head_w - pixel - border_width;
         frame.y_hidden = frame.y;
         break;
 
@@ -839,14 +840,14 @@ void Slit::reposition() {
         frame.x = head_x + head_w - frame.width - border_width*2;
         frame.y = head_y + head_h - frame.height - border_width*2;
         frame.x_hidden = frame.x;
-        frame.y_hidden = head_y + head_h - bevel_width - border_width;
+        frame.y_hidden = head_y + head_h - pixel - border_width;
         break;
 
     case RIGHTBOTTOM:
     default:
         frame.x = head_x + head_w - frame.width - border_width*2;
         frame.y = head_y + head_h - frame.height - border_width*2;
-        frame.x_hidden = head_x + head_w - bevel_width - border_width;
+        frame.x_hidden = head_x + head_w - pixel - border_width;
         frame.y_hidden = frame.y;
         break;
     }
@@ -880,7 +881,7 @@ void Slit::clientUp(SlitClient* client) {
     }
 
     SlitClients::iterator it = m_client_list.begin();
-    for(it++; it != m_client_list.end(); it++) {
+    for(++it; it != m_client_list.end(); ++it) {
         if ((*it) == client) {
             SlitClients::iterator prev = it;
             prev--;
@@ -901,7 +902,7 @@ void Slit::clientDown(SlitClient* client) {
     }
 
     SlitClients::reverse_iterator it = m_client_list.rbegin();
-    for(it++; it != m_client_list.rend(); it++) {
+    for(++it; it != m_client_list.rend(); ++it) {
         if ((*it) == client) {
             SlitClients::reverse_iterator next = it;
             next--;
@@ -954,21 +955,8 @@ void Slit::buttonPressEvent(XButtonEvent &be) {
 
     if (be.button == Button3) {
         if (! m_slitmenu.isVisible()) {
-            int head = screen().getHead(be.x_root, be.y_root);
-            int borderw = m_slitmenu.fbwindow().borderWidth();
-            pair<int, int> m = screen().clampToHead(head,
-                    be.x_root - (m_slitmenu.width() / 2),
-                    be.y_root - (m_slitmenu.titleWindow().height() / 2),
-                    m_slitmenu.width() + 2*borderw,
-                    m_slitmenu.height() + 2*borderw);
-
-            m_slitmenu.setScreen(screen().getHeadX(head),
-                                 screen().getHeadY(head),
-                                 screen().getHeadWidth(head),
-                                 screen().getHeadHeight(head));
-            m_slitmenu.move(m.first, m.second);
-            m_slitmenu.show();
-            m_slitmenu.grabInputFocus();
+            screen().placementStrategy()
+                .placeAndShowMenu(m_slitmenu, be.x_root, be.y_root, false);
         } else
             m_slitmenu.hide();
     }
@@ -1048,10 +1036,10 @@ void Slit::exposeEvent(XExposeEvent &ev) {
     frame.window.clearArea(ev.x, ev.y, ev.width, ev.height);
 }
 
-void Slit::update(FbTk::Subject *subj) {
+void Slit::screenSizeChanged(BScreen &screen) {
     reconfigure();
 #ifdef XINERAMA
-    if (subj == &m_screen.resizeSig() && m_xineramaheadmenu)
+    if (m_xineramaheadmenu)
         m_xineramaheadmenu->reloadHeads();
 #endif // XINERAMA
 }
@@ -1151,7 +1139,7 @@ void Slit::saveClientList() {
     string prevName;
     string name;
     for (; it != it_end; ++it) {
-        name = (*it)->matchName();
+        name = (*it)->matchName().logical();
         if (name != prevName)
             file << name.c_str() << endl;
 
@@ -1182,7 +1170,7 @@ void Slit::setupMenu() {
     // it'll be freed by the slitmenu (since not marked internal)
     FbMenu *placement_menu = new FbMenu(m_screen.menuTheme(),
                                         m_screen.imageControl(),
-                                        *m_screen.layerManager().getLayer(::Layer::MENU));
+                                        *m_screen.layerManager().getLayer(::ResourceLayer::MENU));
 
 
     // setup base menu
@@ -1200,7 +1188,7 @@ void Slit::setupMenu() {
                               screen().menuTheme(),
                               screen(),
                               screen().imageControl(),
-                              *screen().layerManager().getLayer(::Layer::MENU),
+                              *screen().layerManager().getLayer(::ResourceLayer::MENU),
                               *this,
                               _FB_XTEXT(Slit, OnHead, "Slit on Head", "Title of Slits On Head menu")
                               ));
@@ -1235,7 +1223,7 @@ void Slit::setupMenu() {
 
     // setup sub menu
     placement_menu->setLabel(_FB_XTEXT(Slit, Placement, "Slit Placement", "Slit Placement"));
-    placement_menu->setMinimumSublevels(3);
+    placement_menu->setMinimumColumns(3);
     m_layermenu->setInternalMenu();
     m_clientlist_menu.setInternalMenu();
     m_slitmenu.setInternalMenu();

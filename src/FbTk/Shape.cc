@@ -36,6 +36,12 @@
   #include <string.h>
 #endif
 
+#ifdef HAVE_CSTDLIB
+  #include <cstdlib>
+#else
+  #include <stdlib.h>
+#endif
+
 #include <X11/Xutil.h>
 
 #ifdef SHAPE
@@ -44,6 +50,7 @@
 
 #include <algorithm>
 #include <vector>
+#include <iostream>
 
 using std::min;
 
@@ -51,28 +58,28 @@ namespace FbTk {
 
 namespace {
 /* rows is an array of 8 bytes, i.e. 8x8 bits */
-Pixmap makePixmap(FbWindow &drawable, const unsigned char rows[]) {
-
-    Display *disp = App::instance()->display();
+Pixmap makePixmap(Display* disp, int screen_nr, Window parent, const unsigned char rows[]) {
 
     const size_t data_size = 8 * 8;
-    // we use calloc here so we get consistent C alloc/free with XDestroyImage
+    // we use malloc here so we get consistent C alloc/free with XDestroyImage
     // and no warnings in valgrind :)
-    char *data = (char *)calloc(data_size, sizeof (char));
+    char *data = (char *)malloc(data_size * sizeof (char));
     if (data == 0)
         return 0;
 
     memset(data, 0xFF, data_size);
 
     XImage *ximage = XCreateImage(disp,
-                                  DefaultVisual(disp, drawable.screenNumber()),
+                                  DefaultVisual(disp, screen_nr),
                                   1,
                                   XYPixmap, 0,
                                   data,
                                   8, 8,
                                   32, 0);
-    if (ximage == 0)
+    if (ximage == 0) {
+        free(data);
         return 0;
+    }
 
     XInitImage(ximage);
 
@@ -82,7 +89,7 @@ Pixmap makePixmap(FbWindow &drawable, const unsigned char rows[]) {
         }
     }
 
-    FbPixmap pm(drawable, 8, 8, 1);
+    FbPixmap pm(parent, 8, 8, 1);
     GContext gc(pm);
 
     XPutImage(disp, pm.drawable(), gc.gc(), ximage, 0, 0, 0, 0,
@@ -94,16 +101,64 @@ Pixmap makePixmap(FbWindow &drawable, const unsigned char rows[]) {
 }
 
 struct CornerPixmaps {
+    CornerPixmaps() : do_create(true) { }
+
     FbPixmap topleft;
     FbPixmap topright;
     FbPixmap botleft;
     FbPixmap botright;
+
+    bool do_create;
 };
 
 // unfortunately, we need a separate pixmap per screen
 std::vector<CornerPixmaps> s_corners;
 
-}; // end of anonymous namespace
+unsigned long nr_shapes = 0;
+
+void initCorners(int screen) {
+
+    Display* disp = App::instance()->display();
+    if (s_corners.empty())
+        s_corners.resize(ScreenCount(disp));
+
+
+    if (screen < 0 || screen > static_cast<int>(s_corners.size())) {
+        std::cerr << "FbTk/Shape.cc:initCorners(), invalid argument: " << screen << "\n";
+        return;
+    }
+
+    static const unsigned char left_bits[] = { 0xc0, 0xf8, 0xfc, 0xfe, 0xfe, 0xfe, 0xff, 0xff };
+    static const unsigned char right_bits[] = { 0x03, 0x1f, 0x3f, 0x7f, 0x7f, 0x7f, 0xff, 0xff};
+    static const unsigned char bottom_left_bits[] = { 0xff, 0xff, 0xfe, 0xfe, 0xfe, 0xfc, 0xf8, 0xc0 };
+    static const unsigned char bottom_right_bits[] = { 0xff, 0xff, 0x7f, 0x7f, 0x7f, 0x3f, 0x1f, 0x03 };
+
+    CornerPixmaps& corners = s_corners[screen];
+    if (corners.do_create) {
+
+        Window root = RootWindow(disp, screen);
+        corners.topleft = makePixmap(disp, screen, root, left_bits);
+        corners.topright = makePixmap(disp, screen, root, right_bits);
+        corners.botleft = makePixmap(disp, screen, root, bottom_left_bits);
+        corners.botright = makePixmap(disp, screen, root, bottom_right_bits);
+        corners.do_create = false;
+    }
+
+    nr_shapes++; // refcounting
+}
+
+void cleanCorners() {
+
+    if (nr_shapes == 1) {
+        s_corners.clear();
+    }
+
+    if (nr_shapes > 0) {
+        nr_shapes--; // refcounting
+    }
+}
+
+} // end of anonymous namespace
 
 Shape::Shape(FbWindow &win, int shapeplaces):
     m_win(&win),
@@ -137,23 +192,9 @@ Shape::~Shape() {
                           0,
                           ShapeSet);
     }
+
+    cleanCorners();
 #endif // SHAPE
-}
-
-void Shape::initCorners(int screen_num) {
-    if (s_corners.size() == 0)
-        s_corners.resize(ScreenCount(App::instance()->display()));
-
-    static const unsigned char left_bits[] = { 0xc0, 0xf8, 0xfc, 0xfe, 0xfe, 0xfe, 0xff, 0xff };
-    static const unsigned char right_bits[] = { 0x03, 0x1f, 0x3f, 0x7f, 0x7f, 0x7f, 0xff, 0xff};
-    static const unsigned char bottom_left_bits[] = { 0xff, 0xff, 0xfe, 0xfe, 0xfe, 0xfc, 0xf8, 0xc0 };
-    static const unsigned char bottom_right_bits[] = { 0xff, 0xff, 0x7f, 0x7f, 0x7f, 0x3f, 0x1f, 0x03 };
-
-    s_corners[screen_num].topleft = makePixmap(*m_win, left_bits);
-    s_corners[screen_num].topright = makePixmap(*m_win, right_bits);
-    s_corners[screen_num].botleft = makePixmap(*m_win, bottom_left_bits);
-    s_corners[screen_num].botright = makePixmap(*m_win, bottom_right_bits);
-
 }
 
 void Shape::setPlaces(int shapeplaces) {
@@ -187,32 +228,23 @@ void Shape::update() {
         return;
     }
 
+    Region clip = XCreateRegion();
+    Region bound = XCreateRegion();
+
     XRectangle rect;
     rect.x = 0;
     rect.y = 0;
     rect.width = width;
     rect.height = height;
 
-    XShapeCombineRectangles(display,
-                            m_win->window(), ShapeClip,
-                            0, 0, /* offsets */
-                            &rect, 
-                            1,    /* number of rectangles */
-                            ShapeSet, /* op */
-                            2     /* ordering: YXSorted... only 1: doesn't matter */ );
+    XUnionRectWithRegion(&rect, clip, clip);
 
     rect.x = -bw;
     rect.y = -bw;
     rect.width = width+2*bw;
     rect.height = height+2*bw;
 
-    XShapeCombineRectangles(display,
-                            m_win->window(), ShapeBounding,
-                            0, 0, /* offsets */
-                            &rect, 
-                            1,    /* number of rectangles */
-                            ShapeSet, /* op */
-                            2     /* ordering: YXSorted... only 1: doesn't matter */ );
+    XUnionRectWithRegion(&rect, bound, bound);
 
     if (m_shapesource != 0) {
 
@@ -226,47 +258,53 @@ void Shape::update() {
         rect.width = m_shapesource->width();
         rect.height = m_shapesource->height();
 
-        XShapeCombineRectangles(display,
-                                m_win->window(), ShapeClip,
-                                0, 0, /* offsets */
-                                &rect, 
-                                1,    /* number of rectangles */
-                                ShapeSubtract, /* op */
-                                2     /* ordering: YXSorted... only 1: doesn't matter */ );
+        Region clientarea = XCreateRegion();
+        XUnionRectWithRegion(&rect, clientarea, clientarea);
+        XSubtractRegion(clip, clientarea, clip);
+        XSubtractRegion(bound, clientarea, bound);
+        XDestroyRegion(clientarea);
 
         XShapeCombineShape(display,
                            m_win->window(), ShapeClip,
                            rect.x, rect.y, // xOff, yOff
                            m_shapesource->window(),
-                           ShapeClip, ShapeUnion);
+                           ShapeClip, ShapeSet);
+
+        XShapeCombineRegion(display,
+                            m_win->window(), ShapeClip,
+                            0, 0, // offsets
+                            clip, ShapeUnion);
 
         /* 
            Now the bounding rectangle. Note that the frame has a shared border with the region above the 
            client (i.e. titlebar), so we don't want to wipe the shared border, hence the adjustments.
         */
-        rect.x = m_shapesource_xoff; // note that the full bounding region is already offset by a -borderwidth!
-        rect.y = m_shapesource_yoff;
-        rect.width = m_shapesource->width(); // we don't wipe the outer bounding region [i think]
-        rect.height = m_shapesource->height();
-
-        // we want to delete the client area, dont care about borders really
-        XShapeCombineRectangles(display,
-                                m_win->window(), ShapeBounding,
-                                0, 0, /* offsets */
-                                &rect, 
-                                1,    /* number of rectangles */
-                                ShapeSubtract, /* op */
-                                2     /* ordering: YXSorted... only 1: doesn't matter */ );
 
         XShapeCombineShape(display,
                            m_win->window(), ShapeBounding,
-                           rect.x , rect.y, // xOff, yOff
+                           rect.x, rect.y, // xOff, yOff
                            m_shapesource->window(),
-                           ShapeBounding, ShapeUnion);
+                           ShapeBounding, ShapeSet);
+
+        XShapeCombineRegion(display,
+                            m_win->window(), ShapeBounding,
+                            0, 0, // offsets
+                            bound, ShapeUnion);
+    } else {
+        XShapeCombineRegion(display,
+                            m_win->window(), ShapeClip,
+                            0, 0, // offsets
+                            clip, ShapeSet);
+        XShapeCombineRegion(display,
+                            m_win->window(), ShapeBounding,
+                            0, 0, // offsets
+                            bound, ShapeSet);
     }
 
+    XDestroyRegion(clip);
+    XDestroyRegion(bound);
 
-    CornerPixmaps &corners = s_corners[m_win->screenNumber()];
+   const CornerPixmaps &corners = s_corners[m_win->screenNumber()];
 #define SHAPECORNER(corner, x, y, shapekind)            \
     XShapeCombineMask(App::instance()->display(), \
                       m_win->window(),                  \

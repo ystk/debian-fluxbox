@@ -23,6 +23,7 @@
 #include "App.hh"
 
 #include <X11/keysym.h>
+#include <X11/XKBlib.h>
 
 #include <string>
 #ifdef HAVE_CSTRING
@@ -42,18 +43,20 @@ struct t_modlist{
 };
 
 const struct t_modlist modlist[] = {
-    {"SHIFT", ShiftMask},
-    {"LOCK", LockMask},
-    {"CONTROL", ControlMask},
-    {"MOD1", Mod1Mask},
-    {"MOD2", Mod2Mask},
-    {"MOD3", Mod3Mask},
-    {"MOD4", Mod4Mask},
-    {"MOD5", Mod5Mask},
+    {"shift", ShiftMask},
+    {"lock", LockMask},
+    {"control", ControlMask},
+    {"mod1", Mod1Mask},
+    {"mod2", Mod2Mask},
+    {"mod3", Mod3Mask},
+    {"mod4", Mod4Mask},
+    {"mod5", Mod5Mask},
+    {"alt", Mod1Mask},
+    {"ctrl", ControlMask},
     {0, 0}
 };
 
-};
+}
 
 namespace FbTk {
 
@@ -86,7 +89,7 @@ void KeyUtil::loadModmap() {
         XFreeModifiermap(m_modmap);
 
     m_modmap = XGetModifierMapping(App::instance()->display());
-    	
+
     // find modifiers and set them
     for (int i=0, realkey=0; i<8; ++i) {
         for (int key=0; key<m_modmap->max_keypermod; ++key, ++realkey) {
@@ -94,8 +97,8 @@ void KeyUtil::loadModmap() {
             if (m_modmap->modifiermap[realkey] == 0)
                 continue;
 
-            KeySym ks = XKeycodeToKeysym(App::instance()->display(), 
-                    m_modmap->modifiermap[realkey], 0);
+            KeySym ks = XkbKeycodeToKeysym(App::instance()->display(),
+                    m_modmap->modifiermap[realkey], 0, 0);
 
             switch (ks) {
             // we just want to clean the Lock modifier, not specifically the
@@ -152,12 +155,18 @@ void KeyUtil::grabButton(unsigned int button, unsigned int mod, Window win,
 */
 
 unsigned int KeyUtil::getKey(const char *keystr) {
-    if (!keystr)
-        return 0;
-    KeySym sym = XStringToKeysym(keystr);
-    if (sym==NoSymbol)
-        return 0;
-    return XKeysymToKeycode(App::instance()->display(), sym);
+
+    KeyCode code = 0;
+
+    if (keystr) {
+
+        KeySym sym = XStringToKeysym(keystr);
+        if (sym != NoSymbol) {
+            code = XKeysymToKeycode(App::instance()->display(), sym);
+        }
+    }
+
+    return code;
 }
 
 
@@ -167,14 +176,14 @@ unsigned int KeyUtil::getKey(const char *keystr) {
 unsigned int KeyUtil::getModifier(const char *modstr) {
     if (!modstr)
         return 0;
-    
+
     // find mod mask string
     for (unsigned int i=0; modlist[i].str !=0; i++) {
-        if (modlist[i] == modstr)		
-            return modlist[i].mask;		
+        if (modlist[i] == modstr)
+            return modlist[i].mask;
     }
-	
-    return 0;	
+
+    return 0;
 }
 
 /// Ungrabs the keys
@@ -191,7 +200,7 @@ void KeyUtil::ungrabButtons(Window win) {
 unsigned int KeyUtil::keycodeToModmask(unsigned int keycode) {
     XModifierKeymap *modmap = instance().m_modmap;
 
-    if (!modmap) 
+    if (!modmap)
         return 0;
 
     // search through modmap for this keycode
@@ -202,7 +211,7 @@ unsigned int KeyUtil::keycodeToModmask(unsigned int keycode) {
             if (modmap->modifiermap[modmap->max_keypermod*mod + key] == keycode) {
                 return modlist[mod].mask;
             }
-        } 
+        }
     }
     // no luck
     return 0;

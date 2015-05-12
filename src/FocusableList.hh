@@ -23,8 +23,8 @@
 #define FOCUSABLELIST_HH
 
 #include "FbTk/NotCopyable.hh"
-#include "FbTk/Observer.hh"
-#include "FbTk/Subject.hh"
+#include "FbTk/RefCount.hh"
+#include "FbTk/Signal.hh"
 
 #include "ClientPattern.hh"
 
@@ -34,8 +34,11 @@
 
 class BScreen;
 class Focusable;
+class WinClient;
+class FluxboxWindow;
 
-class FocusableList: public FbTk::Observer, private FbTk::NotCopyable {
+class FocusableList: private FbTk::NotCopyable,
+                     private FbTk::SignalTracker {
 public:
     typedef std::list<Focusable *> Focusables;
 
@@ -46,14 +49,12 @@ public:
     };
 
     FocusableList(BScreen &scr): m_pat(0), m_parent(0), m_screen(scr) { }
-    FocusableList(BScreen &scr, const std::string pat);
+    FocusableList(BScreen &scr, const std::string & pat);
     FocusableList(BScreen &scr, const FocusableList &parent,
-                  const std::string pat);
+                  const std::string & pat);
 
     static void parseArgs(const std::string &in, int &opts, std::string &out);
     static const FocusableList *getListFromOptions(BScreen &scr, int opts);
-
-    void update(FbTk::Subject *subj);
 
     /// functions for modifying the list contents
     void pushFront(Focusable &win);
@@ -77,29 +78,11 @@ public:
        @name signals
        @{
     */
-    FbTk::Subject &orderSig() { return m_ordersig; }
-    const FbTk::Subject &orderSig() const { return m_ordersig; }
-    FbTk::Subject &addSig() { return m_addsig; }
-    const FbTk::Subject &addSig() const { return m_addsig; }
-    FbTk::Subject &removeSig() { return m_removesig; }
-    const FbTk::Subject &removeSig() const { return m_removesig; }
-    FbTk::Subject &resetSig() { return m_resetsig; }
-    const FbTk::Subject &resetSig() const { return m_resetsig; }
+    const FbTk::Signal<Focusable *> &orderSig() const { return m_ordersig; }
+    const FbTk::Signal<Focusable *> &addSig() const { return m_addsig; }
+    const FbTk::Signal<Focusable *> &removeSig() const { return m_removesig; }
+    const FbTk::Signal<> &resetSig() const { return m_resetsig; }
     /** @} */ // end group signals
-
-    /**
-     * Signaling object to attatch observers to.
-     */
-    class FocusableListSubject: public FbTk::Subject {
-    public:
-        explicit FocusableListSubject(): m_win(0) { }
-        void notify(Focusable *win) { m_win = win; FbTk::Subject::notify(); }
-        /// @return context for this signal
-        Focusable *win() { return m_win; }
-
-    private:
-        Focusable *m_win;
-    };
 
 private:
     void init();
@@ -107,16 +90,27 @@ private:
     void checkUpdate(Focusable &win);
     bool insertFromParent(Focusable &win);
     void attachSignals(Focusable &win);
-    void detachSignals(Focusable &win);
     void reset();
-    void attachChild(FocusableList &child) const;
+    void workspaceChanged(BScreen &screen);
+    void focusedWindowChanged(BScreen &screen, FluxboxWindow *win, WinClient *client);
+    /// Title has changed for a window
+    /// @param win The window that title changed for.
+    void updateTitle(Focusable& win);
+    void parentOrderChanged(Focusable* win);
+    void parentWindowAdded(Focusable* win);
+    void parentWindowRemoved(Focusable* win);
+    void windowUpdated(FluxboxWindow &fbwin);
+
 
     std::auto_ptr<ClientPattern> m_pat;
     const FocusableList *m_parent;
     BScreen &m_screen;
     std::list<Focusable *> m_list;
 
-    mutable FocusableListSubject m_ordersig, m_addsig, m_removesig, m_resetsig;
+    FbTk::Signal<Focusable *> m_ordersig, m_addsig, m_removesig;
+    FbTk::Signal<> m_resetsig;
+    typedef std::map<Focusable*, FbTk::RefCount<FbTk::SignalTracker> > SignalMap;
+    SignalMap m_signal_map;
 };
 
 #endif // FOCUSABLELIST_HH

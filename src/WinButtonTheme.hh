@@ -51,6 +51,7 @@ public:
     const FbTk::PixmapWithMask &stickPixmap() const { return *m_stick_pm; }
     FbTk::PixmapWithMask &stickPixmap() { return *m_stick_pm; }
 
+    const FbTk::PixmapWithMask &stuckPixmap() const { return *m_stuck_pm; }
     FbTk::PixmapWithMask &stuckPixmap() { return *m_stuck_pm; }
 
     const FbTk::PixmapWithMask &shadePixmap() const { return *m_shade_pm; }
@@ -61,12 +62,19 @@ public:
 
     const FbTk::PixmapWithMask &menuiconPixmap() const { return *m_menuicon_pm; }
     FbTk::PixmapWithMask &menuiconPixmap() { return *m_menuicon_pm; }
-    
+
     FbTk::PixmapWithMask &titlePixmap() { return *m_title_pm; }
     const FbTk::PixmapWithMask &titlePixmap() const { return *m_title_pm; }
 
-    virtual FbTk::Subject &reconfigSig() { return FbTk::Theme::reconfigSig(); }
-    virtual const FbTk::Subject &reconfigSig() const { return FbTk::Theme::reconfigSig(); }
+
+    FbTk::PixmapWithMask &leftHalfPixmap() { return *m_lefthalf_pm; }
+    const FbTk::PixmapWithMask &leftHalfPixmap() const { return *m_lefthalf_pm; }
+
+    FbTk::PixmapWithMask &rightHalfPixmap() { return *m_righthalf_pm; }
+    const FbTk::PixmapWithMask &rightHalfPixmap() const { return *m_righthalf_pm; }
+
+
+    virtual FbTk::Signal<> &reconfigSig() { return FbTk::Theme::reconfigSig(); }
 
     virtual WinButtonTheme &operator *() { return *this; }
     virtual const WinButtonTheme &operator *() const { return *this; }
@@ -75,7 +83,7 @@ private:
 
     FbTk::ThemeItem<FbTk::PixmapWithMask> m_close_pm, m_maximize_pm,
             m_iconify_pm, m_shade_pm, m_unshade_pm, m_menuicon_pm, m_title_pm,
-            m_stick_pm, m_stuck_pm;
+            m_stick_pm, m_stuck_pm, m_lefthalf_pm, m_righthalf_pm;
 
     FbTk::ThemeProxy<FbWinFrameTheme> &m_frame_theme;
 };

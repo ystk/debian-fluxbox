@@ -37,10 +37,11 @@
 
 #include "FbTk/Timer.hh"
 #include "FbTk/Resource.hh"
-#include "FbTk/XLayer.hh"
-#include "FbTk/XLayerItem.hh"
+#include "FbTk/Layer.hh"
+#include "FbTk/LayerItem.hh"
 #include "FbTk/EventHandler.hh"
 #include "FbTk/FbWindow.hh"
+#include "FbTk/Signal.hh"
 
 #include <memory>
 
@@ -67,11 +68,13 @@ public:
         BOTTOMLEFT, BOTTOMCENTER, BOTTOMRIGHT,
         // left and right placement
         LEFTBOTTOM, LEFTCENTER, LEFTTOP,
-        RIGHTBOTTOM, RIGHTCENTER, RIGHTTOP
+        RIGHTBOTTOM, RIGHTCENTER, RIGHTTOP,
+
+        DEFAULT = BOTTOMRIGHT
     };
 
     /// Create a toolbar on the screen with specific width
-    Toolbar(BScreen &screen, FbTk::XLayer &layer, size_t width = 200);
+    Toolbar(BScreen &screen, FbTk::Layer &layer, size_t width = 200);
 
     virtual ~Toolbar();
 
@@ -99,7 +102,7 @@ public:
     void reconfigure();
     void setPlacement(Placement where);
 
-    int layerNumber() const { return const_cast<FbTk::XLayerItem &>(m_layeritem).getLayerNum(); }
+    int layerNumber() const { return const_cast<FbTk::LayerItem &>(m_layeritem).getLayerNum(); }
 
     const FbTk::Menu &menu() const { return m_toolbarmenu; }
     FbTk::Menu &menu() { return m_toolbarmenu; }
@@ -139,6 +142,9 @@ private:
     void updateStrut();
     void updateAlpha();
 
+    /// Called when the screen changed property.
+    void screenChanged(BScreen &screen);
+
     bool m_hidden;       ///< hidden state
 
     /// Toolbar frame
@@ -158,7 +164,7 @@ private:
 
     FbTk::Timer m_hide_timer; ///< timer to for auto hide toolbar
 
-    FbTk::XLayerItem m_layeritem; ///< layer item, must be declared before layermenu
+    FbTk::LayerItem m_layeritem; ///< layer item, must be declared before layermenu
     LayerMenu m_layermenu;
     FbMenu m_placementmenu, m_toolbarmenu;
 #ifdef XINERAMA
@@ -181,7 +187,7 @@ private:
     FbTk::Resource<bool> m_rc_auto_hide, m_rc_maximize_over, m_rc_visible;
     FbTk::Resource<int> m_rc_width_percent;
     FbTk::Resource<int> m_rc_alpha;
-    FbTk::Resource<class Layer> m_rc_layernum;
+    FbTk::Resource<class ResourceLayer> m_rc_layernum;
     FbTk::Resource<int> m_rc_on_head;
     FbTk::Resource<Placement> m_rc_placement;
     FbTk::Resource<int> m_rc_height;
@@ -191,8 +197,7 @@ private:
     StringList m_tools;
 
     bool m_resize_lock; ///< to lock rearrangeItems or not
-    /// observers for various signals
-    std::vector<FbTk::Observer*> m_observers;
+    FbTk::SignalTracker m_signal_tracker;
 };
 
 

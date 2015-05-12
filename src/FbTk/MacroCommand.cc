@@ -33,16 +33,18 @@ namespace {
 template <typename M>
 M *addCommands(M *macro, const std::string &args, bool trusted) {
 
-    std::string blah;
+    std::string remainder;
     std::list<std::string> cmds;
-    StringUtil::stringTokensBetween(cmds, args, blah, '{', '}');
+    StringUtil::stringTokensBetween(cmds, args, remainder, '{', '}');
     RefCount<Command<void> > cmd(0);
 
-    std::list<std::string>::iterator it = cmds.begin(), it_end = cmds.end();
-    for (; it != it_end; ++it) {
-        cmd = CommandParser<void>::instance().parse(*it, trusted);
-        if (*cmd)
-            macro->add(cmd);
+    if (remainder.length() == 0) {
+        std::list<std::string>::iterator it = cmds.begin(), it_end = cmds.end();
+        for (; it != it_end; ++it) {
+            cmd.reset( CommandParser<void>::instance().parse(*it, trusted) );
+            if (cmd)
+                macro->add(cmd);
+        }
     }
 
     if (macro->size() > 0)
@@ -64,7 +66,7 @@ Command<void> *parseMacroCmd(const std::string &command, const std::string &args
 REGISTER_COMMAND_PARSER(macrocmd, parseMacroCmd, void);
 REGISTER_COMMAND_PARSER(togglecmd, parseMacroCmd, void);
 
-}; // end anonymous namespace
+} // end anonymous namespace
 
 void MacroCommand::add(RefCount<Command<void> > &com) {
     m_commandlist.push_back(com);

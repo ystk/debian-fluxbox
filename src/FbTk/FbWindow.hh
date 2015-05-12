@@ -23,10 +23,16 @@
 #define FBTK_FBWINDOW_HH
 
 #include "FbDrawable.hh"
-
+#include "FbString.hh"
 #include <memory>
 #include <string>
 #include <set>
+
+#ifdef HAVE_CMATH
+  #include <cmath>
+#else
+  #include <math.h>
+#endif
 
 namespace FbTk {
 
@@ -57,7 +63,9 @@ public:
              bool overrride_redirect = false,
              bool save_unders = false,
              unsigned int depth = CopyFromParent,
-             int class_type = InputOutput);
+             int class_type = InputOutput,
+             Visual *visual = CopyFromParent,
+             Colormap cmap = CopyFromParent);
 
     FbWindow(const FbWindow &parent,
              int x, int y,
@@ -66,7 +74,9 @@ public:
              bool overrride_redirect = false,
              bool save_unders = false,
              unsigned int depth = CopyFromParent,
-             int class_type = InputOutput);
+             int class_type = InputOutput,
+             Visual *visual = CopyFromParent,
+             Colormap cmap = CopyFromParent);
 
     virtual ~FbWindow();
     virtual void setBackgroundColor(const FbTk::Color &bg_color);
@@ -77,6 +87,8 @@ public:
     virtual void setBorderWidth(unsigned int size);
     /// set window name ("title")
     void setName(const char *name);
+    /// set window role
+    void setWindowRole(const char *windowRole);
     void setEventMask(long mask);
     /// clear window with background pixmap or color
     virtual void clear();
@@ -88,7 +100,7 @@ public:
                            unsigned int height = 0, Pixmap dest_override = None,
                            bool override_is_offset = false);
 
-    void setAlpha(unsigned char alpha);
+    void setAlpha(int alpha);
 
     virtual FbWindow &operator = (const FbWindow &win);
     /// assign a new X window to this
@@ -158,7 +170,8 @@ public:
 
     void deleteProperty(Atom property);
 
-    std::string textProperty(Atom property) const;
+    long cardinalProperty(Atom property,bool*exists=NULL) const;
+    FbTk::FbString textProperty(Atom property,bool*exists=NULL) const;
 
     void addToSaveSet();
     void removeFromSaveSet();
@@ -176,7 +189,7 @@ public:
     unsigned int borderWidth() const { return m_border_width; }
     unsigned long borderColor() const { return m_border_color; }
     unsigned int depth() const { return m_depth; }
-    unsigned char alpha() const;
+    int alpha() const;
     int screenNumber() const;
     long eventMask() const;
 
@@ -188,7 +201,7 @@ public:
     bool operator != (const FbWindow &win) const { return m_window != win.m_window; }
 
     // used for composite
-    void setOpaque(unsigned char alpha);
+    void setOpaque(int alpha);
 
     void setRenderer(FbWindowRenderer &renderer) { m_renderer = &renderer; }
     void sendConfigureNotify(int x, int y, unsigned int width,
@@ -199,12 +212,14 @@ public:
 
     static void updatedAlphaBackground(int screen);
 
+    /// updates x,y, width, height and screen num from X window
+    bool updateGeometry();
+
 protected:
     /// creates a window with x window client (m_window = client)
     explicit FbWindow(Window client);
 
-    /// updates x,y, width, height and screen num from X window
-    void updateGeometry();
+    void setDepth(unsigned int depth) { m_depth = depth; }
 
 private:
     /// sets new X window and destroys old
@@ -215,7 +230,9 @@ private:
                 bool override_redirect,
                 bool save_unders,
                 unsigned int depth,
-                int class_type);
+                int class_type,
+                Visual *visual,
+                Colormap cmap);
 
     const FbWindow *m_parent; ///< parent FbWindow
     int m_screen_num;  ///< screen num on which this window exist
@@ -248,6 +265,7 @@ public:
     virtual void renderForeground(FbWindow &win, FbDrawable &drawable) = 0;
     virtual ~FbWindowRenderer() { }
 };
+
 
 
 } // end namespace FbTk

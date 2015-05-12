@@ -36,6 +36,7 @@
 #include "Layer.hh"
 
 #include "defaults.hh"
+#include "Debug.hh"
 
 #include "FbTk/I18n.hh"
 #include "FbTk/Image.hh"
@@ -43,6 +44,7 @@
 #include "FbTk/ImageControl.hh"
 #include "FbTk/EventManager.hh"
 #include "FbTk/StringUtil.hh"
+#include "FbTk/Util.hh"
 #include "FbTk/Resource.hh"
 #include "FbTk/SimpleCommand.hh"
 #include "FbTk/XrmDatabaseHelper.hh"
@@ -53,6 +55,7 @@
 #include "FbTk/Select2nd.hh"
 #include "FbTk/Compose.hh"
 #include "FbTk/KeyUtil.hh"
+#include "FbTk/MemFun.hh"
 
 //Use GNU extensions
 #ifndef	 _GNU_SOURCE
@@ -63,12 +66,9 @@
 #include "config.h"
 #endif // HAVE_CONFIG_H
 
-#ifdef USE_GNOME
-#include "Gnome.hh"
-#endif // USE_GNOME
-#ifdef USE_NEWWMSPEC
+#ifdef USE_EWMH
 #include "Ewmh.hh"
-#endif // USE_NEWWMSPEC
+#endif // USE_EWMH
 #ifdef REMEMBER
 #include "Remember.hh"
 #endif // REMEMBER
@@ -84,7 +84,7 @@
 #ifdef SHAPE
 #include <X11/extensions/shape.h>
 #endif // SHAPE
-#ifdef HAVE_RANDR
+#if defined(HAVE_RANDR) || defined(HAVE_RANDR1_2)
 #include <X11/extensions/Xrandr.h>
 #endif // HAVE_RANDR
 
@@ -124,7 +124,9 @@
 #include <sys/stat.h>
 #endif // HAVE_SYS_STAT_H
 
+#ifdef HAVE_SYS_WAIT_H
 #include <sys/wait.h>
+#endif // HAVE_SYS_WAIT_H
 
 #include <iostream>
 #include <memory>
@@ -140,15 +142,14 @@ using std::pair;
 using std::bind2nd;
 using std::mem_fun;
 using std::equal_to;
-
-#ifdef DEBUG
 using std::hex;
 using std::dec;
-#endif // DEBUG
 
 using namespace FbTk;
 
 namespace {
+
+const char RC_INIT_FILE[] = "init";
 
 Window last_bad_window = None;
 
@@ -164,8 +165,14 @@ int handleXErrors(Display *d, XErrorEvent *e) {
         char errtxt[128];
 
         XGetErrorText(d, e->error_code, errtxt, 128);
-        cerr<<"Fluxbox: X Error: "<<errtxt<<"("<<(int)e->error_code<<") opcodes "<<
-            (int)e->request_code<<"/"<<(int)e->minor_code<<" resource 0x"<<hex<<(int)e->resourceid<<dec<<endl;
+        cerr << "Fluxbox: X Error: " 
+             << errtxt 
+             << "(" <<(int)e->error_code << ") opcodes " 
+             << (int)e->request_code 
+             << "/" 
+             << (int)e->minor_code 
+             << " resource 0x" << hex <<(int)e->resourceid 
+             << dec << endl;
 //        if (e->error_code != 9 && e->error_code != 183)
 //            kill(0, 2);
     }
@@ -174,18 +181,67 @@ int handleXErrors(Display *d, XErrorEvent *e) {
     return False;
 }
 
+
+
+/* functor to call a memberfunction with by a reference argument
+   other places needs this helper as well it should be moved
+   to FbTk/
+
+   g++-4.1 does not like to work with:
+
+      struct Bar;
+      struct Foo {
+          void foo(Bar&);
+      };
+
+      Bar bar;
+      bind2nd(mem_fun(&F::foo), bar);
+
+   it complaints about not beeing able to store a reference to
+   a reference (Bar&&).
+
+   'CallMemFunWithRefArg' makes g++-4.1 happy without
+   having to consider switching over to boost::bind() or enforcing 
+   a newer compiler.
+ */
+template <typename Type, typename ArgType, typename ResultType>
+struct CallMemFunWithRefArg : std::unary_function<Type, ResultType> {
+
+    explicit CallMemFunWithRefArg(ResultType (Type::*func)(ArgType), ArgType arg) :
+        m_arg(arg),
+        m_func(func) { }
+
+    ResultType operator()(Type* p) const {
+        (*p.*m_func)(m_arg);
+    }
+
+    ArgType m_arg;
+    ResultType (Type::*m_func)(ArgType);
+};
+
+
+int s_randr_event_type = 0; ///< the type number of randr event
+int s_shape_eventbase = 0;  ///< event base for shape events
+bool s_have_shape = false ; ///< if shape is supported by server
+
+Atom s_kwm1_dockwindow;
+Atom s_kwm2_dockwindow;
+
+Fluxbox* s_singleton = 0;
+
 } // end anonymous
 
-//static singleton var
-Fluxbox *Fluxbox::s_singleton=0;
 
-Fluxbox::Fluxbox(int argc, char **argv, const char *dpy_name,
-                 const char *rcfilename, bool xsync)
-    : FbTk::App(dpy_name),
-      m_fbatoms(new FbAtoms()),
-      m_resourcemanager(rcfilename, true),
+Fluxbox::Fluxbox(int argc, char **argv,
+                 const std::string& dpy_name,
+                 const std::string& rc_path, const std::string& rc_filename, bool xsync)
+    : FbTk::App(dpy_name.c_str()),
+      m_fbatoms(FbAtoms::instance()),
+      m_resourcemanager(rc_filename.c_str(), true),
       // TODO: shouldn't need a separate one for screen
       m_screen_rm(m_resourcemanager),
+
+      m_RC_PATH(rc_path),
       m_rc_ignoreborder(m_resourcemanager, false, "session.ignoreBorder", "Session.IgnoreBorder"),
       m_rc_pseudotrans(m_resourcemanager, false, "session.forcePseudoTransparency", "Session.forcePseudoTransparency"),
       m_rc_colors_per_channel(m_resourcemanager, 4,
@@ -193,11 +249,11 @@ Fluxbox::Fluxbox(int argc, char **argv, const char *dpy_name,
       m_rc_double_click_interval(m_resourcemanager, 250, "session.doubleClickInterval", "Session.DoubleClickInterval"),
       m_rc_tabs_padding(m_resourcemanager, 0, "session.tabPadding", "Session.TabPadding"),
       m_rc_stylefile(m_resourcemanager, DEFAULTSTYLE, "session.styleFile", "Session.StyleFile"),
-      m_rc_styleoverlayfile(m_resourcemanager, "~/." + realProgramName("fluxbox") + "/overlay", "session.styleOverlay", "Session.StyleOverlay"),
-      m_rc_menufile(m_resourcemanager, DEFAULTMENU, "session.menuFile", "Session.MenuFile"),
-      m_rc_keyfile(m_resourcemanager, DEFAULTKEYSFILE, "session.keyFile", "Session.KeyFile"),
-      m_rc_slitlistfile(m_resourcemanager, "~/." + realProgramName("fluxbox") + "/slitlist", "session.slitlistFile", "Session.SlitlistFile"),
-      m_rc_appsfile(m_resourcemanager, "~/." + realProgramName("fluxbox") + "/apps", "session.appsFile", "Session.AppsFile"),
+      m_rc_styleoverlayfile(m_resourcemanager, m_RC_PATH + "/overlay", "session.styleOverlay", "Session.StyleOverlay"),
+      m_rc_menufile(m_resourcemanager, m_RC_PATH + "/menu", "session.menuFile", "Session.MenuFile"),
+      m_rc_keyfile(m_resourcemanager, m_RC_PATH + "/keys", "session.keyFile", "Session.KeyFile"),
+      m_rc_slitlistfile(m_resourcemanager, m_RC_PATH + "/slitlist", "session.slitlistFile", "Session.SlitlistFile"),
+      m_rc_appsfile(m_resourcemanager, m_RC_PATH + "/apps", "session.appsFile", "Session.AppsFile"),
       m_rc_tabs_attach_area(m_resourcemanager, ATTACH_AREA_WINDOW, "session.tabsAttachArea", "Session.TabsAttachArea"),
       m_rc_cache_life(m_resourcemanager, 5, "session.cacheLife", "Session.CacheLife"),
       m_rc_cache_max(m_resourcemanager, 200, "session.cacheMax", "Session.CacheMax"),
@@ -207,16 +263,13 @@ Fluxbox::Fluxbox(int argc, char **argv, const char *dpy_name,
       m_keyscreen(0),
       m_last_time(0),
       m_masked(0),
-      m_rc_file(rcfilename ? rcfilename : ""),
+      m_rc_file(rc_filename),
       m_argv(argv), m_argc(argc),
       m_showing_dialog(false),
       m_starting(true),
       m_restarting(false),
       m_shutdown(false),
-      m_server_grabs(0),
-      m_randr_event_type(0),
-      m_RC_PATH(realProgramName("fluxbox")),
-      m_RC_INIT_FILE("init") {
+      m_server_grabs(0) {
 
     _FB_USES_NLS;
     if (s_singleton != 0)
@@ -231,10 +284,10 @@ Fluxbox::Fluxbox(int argc, char **argv, const char *dpy_name,
     Display *disp = FbTk::App::instance()->display();
     // For KDE dock applets
     // KDE v1.x
-    m_kwm1_dockwindow = XInternAtom(disp,
+    s_kwm1_dockwindow = XInternAtom(disp,
                                     "KWM_DOCKWINDOW", False);
     // KDE v2.x
-    m_kwm2_dockwindow = XInternAtom(disp,
+    s_kwm2_dockwindow = XInternAtom(disp,
                                     "_KDE_NET_WM_SYSTEM_TRAY_WINDOW_FOR", False);
     // setup X error handler
     XSetErrorHandler((XErrorHandler) handleXErrors);
@@ -243,13 +296,16 @@ Fluxbox::Fluxbox(int argc, char **argv, const char *dpy_name,
     SignalHandler &sigh = SignalHandler::instance();
     sigh.registerHandler(SIGSEGV, this);
     sigh.registerHandler(SIGFPE, this);
-    sigh.registerHandler(SIGPIPE, this); // e.g. output sent to grep
     sigh.registerHandler(SIGTERM, this);
     sigh.registerHandler(SIGINT, this);
+#ifndef _WIN32
+    sigh.registerHandler(SIGPIPE, this); // e.g. output sent to grep
     sigh.registerHandler(SIGCHLD, this);
     sigh.registerHandler(SIGHUP, this);
     sigh.registerHandler(SIGUSR1, this);
     sigh.registerHandler(SIGUSR2, this);
+#endif
+
     //
     // setup timer
     // This timer is used to we can issue a safe reconfig command.
@@ -257,10 +313,7 @@ Fluxbox::Fluxbox(int argc, char **argv, const char *dpy_name,
     // because it could affect ongoing menu stuff so we need to reconfig in
     // the next event "round".
     FbTk::RefCount<FbTk::Command<void> > reconfig_cmd(new FbTk::SimpleCommand<Fluxbox>(*this, &Fluxbox::timed_reconfigure));
-    timeval to;
-    to.tv_sec = 0;
-    to.tv_usec = 1;
-    m_reconfig_timer.setTimeout(to);
+    m_reconfig_timer.setTimeout(1);
     m_reconfig_timer.setCommand(reconfig_cmd);
     m_reconfig_timer.fireOnce(true);
 
@@ -268,24 +321,19 @@ Fluxbox::Fluxbox(int argc, char **argv, const char *dpy_name,
         XSynchronize(disp, True);
 
     s_singleton = this;
-    m_have_shape = false;
-    m_shape_eventbase = 0;
+
 #ifdef SHAPE
     int shape_err;
-    m_have_shape = XShapeQueryExtension(disp, &m_shape_eventbase, &shape_err);
+    s_have_shape = XShapeQueryExtension(disp, &s_shape_eventbase, &shape_err);
 #endif // SHAPE
 
-#ifdef HAVE_RANDR
-    // get randr event type
+#if defined(HAVE_RANDR) || defined(HAVE_RANDR1_2)
     int randr_error_base;
-    XRRQueryExtension(disp, &m_randr_event_type, &randr_error_base);
+    XRRQueryExtension(disp, &s_randr_event_type, &randr_error_base);
 #endif // HAVE_RANDR
 
     load_rc();
-
     grab();
-
-    setupConfigFiles();
 
     if (! XSupportsLocale())
         cerr<<_FB_CONSOLETEXT(Fluxbox, WarningLocale, 
@@ -319,7 +367,6 @@ Fluxbox::Fluxbox(int argc, char **argv, const char *dpy_name,
         screens.push_back(i);
 
     // find out, on what "screens" fluxbox should run
-    // FIXME(php-coder): maybe it worths moving this code to main.cc, where command line is parsed?
     for (i = 1; i < m_argc; i++) {
         if (! strcmp(m_argv[i], "-screen")) {
             if ((++i) >= m_argc) {
@@ -338,7 +385,7 @@ Fluxbox::Fluxbox(int argc, char **argv, const char *dpy_name,
             int scrnr = 0;
             FbTk::StringUtil::stringtok(vals, m_argv[i], ",:");
             for (vector<string>::iterator scrit = vals.begin();
-                 scrit != vals.end(); scrit++) {
+                 scrit != vals.end(); ++scrit) {
                 scrnr = atoi(scrit->c_str());
                 if (scrnr >= 0 && scrnr < ScreenCount(disp))
                     scrtmp.push_back(scrnr);
@@ -351,12 +398,11 @@ Fluxbox::Fluxbox(int argc, char **argv, const char *dpy_name,
 
     // create screens
     for (size_t s = 0; s < screens.size(); s++) {
-        char scrname[128], altscrname[128];
-        sprintf(scrname, "session.screen%d", screens[s]);
-        sprintf(altscrname, "session.Screen%d", screens[s]);
+        std::string sc_nr = FbTk::StringUtil::number2String(screens[s]);
         BScreen *screen = new BScreen(m_screen_rm.lock(),
-                                      scrname, altscrname,
-                                      screens[s], ::Layer::NUM_LAYERS);
+                                      std::string("session.screen") + sc_nr,
+                                      std::string("session.Screen") + sc_nr,
+                                      screens[s], ::ResourceLayer::NUM_LAYERS);
 
         // already handled
         if (! screen->isScreenManaged()) {
@@ -376,25 +422,19 @@ Fluxbox::Fluxbox(int argc, char **argv, const char *dpy_name,
 
     m_keyscreen = m_mousescreen = m_screen_list.front();
 
-#ifdef USE_NEWWMSPEC
-    addAtomHandler(new Ewmh(), "ewmh"); // for Extended window manager atom support
-#endif // USE_NEWWMSPEC
-#ifdef USE_GNOME
-    addAtomHandler(new Gnome(), "gnome"); // for gnome 1 atom support
-#endif //USE_GNOME
+#ifdef USE_EWMH
+    addAtomHandler(new Ewmh());
+#endif // USE_EWMH
     // parse apps file after creating screens (so we can tell if it's a restart
     // for [startup] items) but before creating windows
     // this needs to be after ewmh and gnome, so state atoms don't get
     // overwritten before they're applied
 #ifdef REMEMBER
-    addAtomHandler(new Remember(), "remember"); // for remembering window attribs
+    addAtomHandler(new Remember()); // for remembering window attribs
 #endif // REMEMBER
 
     // init all "screens"
-    ScreenList::iterator it = m_screen_list.begin();
-    ScreenList::iterator it_end = m_screen_list.end();
-    for(; it != it_end; ++it)
-        initScreen(*it);
+    STLUtil::forAll(m_screen_list, bind1st(mem_fun(&Fluxbox::initScreen), this));
 
     XAllowEvents(disp, ReplayPointer, CurrentTime);
 
@@ -406,10 +446,10 @@ Fluxbox::Fluxbox(int argc, char **argv, const char *dpy_name,
     m_resourcemanager.unlock();
     ungrab();
 
-#ifdef DEBUG
-    if (m_resourcemanager.lockDepth() != 0)
-        cerr<<"--- resource manager lockdepth = "<<m_resourcemanager.lockDepth()<<endl;
-#endif //DEBUG
+    if (m_resourcemanager.lockDepth() != 0) {
+        fbdbg<<"--- resource manager lockdepth = "<<m_resourcemanager.lockDepth()<<endl;
+    }
+
     m_starting = false;
     //
     // For dumping theme items
@@ -423,22 +463,15 @@ Fluxbox::Fluxbox(int argc, char **argv, const char *dpy_name,
 Fluxbox::~Fluxbox() {
 
     // this needs to be destroyed before screens; otherwise, menus stored in
-    // key commands cause a segfault when the XLayerItem is destroyed
+    // key commands cause a segfault when the LayerItem is destroyed
     m_key.reset(0);
 
-    // destroy screens (after others, as they may do screen things)
-    while (!m_screen_list.empty()) {
-        delete m_screen_list.back();
-        m_screen_list.pop_back();
-    }
+    leaveAll(); // leave all connections
 
-    // destroy atomhandlers
-    for (AtomHandlerContainerIt it= m_atomhandler.begin();
-         it != m_atomhandler.end();
-         it++) {
-        delete (*it).first;
-    }
-    m_atomhandler.clear();
+    // destroy screens (after others, as they may do screen things)
+    FbTk::STLUtil::destroyAndClear(m_screen_list);
+
+    FbTk::STLUtil::destroyAndClear(m_atomhandler);
 }
 
 
@@ -446,23 +479,30 @@ void Fluxbox::initScreen(BScreen *screen) {
 
     // now we can create menus (which needs this screen to be in screen_list)
     screen->initMenus();
-
     screen->initWindows();
 
     // attach screen signals to this
-    screen->currentWorkspaceSig().attach(this);
-    screen->focusedWindowSig().attach(this);
-    screen->workspaceCountSig().attach(this);
-    screen->workspaceNamesSig().attach(this);
-    screen->workspaceAreaSig().attach(this);
-    screen->clientListSig().attach(this);
+    join(screen->workspaceAreaSig(),
+         FbTk::MemFun(*this, &Fluxbox::workspaceAreaChanged));
+
+    join(screen->focusedWindowSig(),
+         FbTk::MemFun(*this, &Fluxbox::focusedWindowChanged));
+
+    join(screen->clientListSig(),
+         FbTk::MemFun(*this, &Fluxbox::clientListChanged));
+
+    join(screen->workspaceNamesSig(), 
+         FbTk::MemFun(*this, &Fluxbox::workspaceNamesChanged));
+    join(screen->currentWorkspaceSig(), 
+         FbTk::MemFun(*this, &Fluxbox::workspaceChanged));
+
+    join(screen->workspaceCountSig(), 
+         FbTk::MemFun(*this, &Fluxbox::workspaceCountChanged));
 
     // initiate atomhandler for screen specific stuff
-    for (AtomHandlerContainerIt it= m_atomhandler.begin();
-         it != m_atomhandler.end();
-         it++) {
-        (*it).first->initForScreen(*screen);
-    }
+    STLUtil::forAll(m_atomhandler, 
+            CallMemFunWithRefArg<AtomHandler, BScreen&, void>(&AtomHandler::initForScreen, *screen));
+    //STLUtil::forAll(m_atomhandler, bind2nd(mem_fun(&AtomHandler::initForScreen), *screen));
 
     FocusControl::revertFocus(*screen); // make sure focus style is correct
 
@@ -470,8 +510,11 @@ void Fluxbox::initScreen(BScreen *screen) {
 
 
 void Fluxbox::eventLoop() {
+
     Display *disp = display();
+
     while (!m_shutdown) {
+
         if (XPending(disp)) {
             XEvent e;
             XNextEvent(disp, &e);
@@ -480,17 +523,16 @@ void Fluxbox::eventLoop() {
                 e.type != DestroyNotify) { // we must let the actual destroys through
                 if (e.type == FocusOut)
                     revertFocus();
-#ifdef DEBUG
                 else
-                    cerr<<"Fluxbox::eventLoop(): removing bad window from event queue"<<endl;
-#endif // DEBUG
+                    fbdbg<<"Fluxbox::eventLoop(): removing bad window from event queue"<<endl;
             } else {
                 last_bad_window = None;
                 handleEvent(&e);
             }
         } else {
-            FbTk::Timer::updateTimers(ConnectionNumber(disp)); //handle all timers
+            FbTk::Timer::updateTimers(ConnectionNumber(disp));
         }
+
     }
 }
 
@@ -517,113 +559,11 @@ void Fluxbox::ungrab() {
         m_server_grabs = 0;
 }
 
-/**
- setup the configutation files in
- home directory
-*/
-void Fluxbox::setupConfigFiles() {
-
-    bool create_init = false, create_keys = false, create_menu = false,
-         create_apps = false, create_overlay = false, create_windowmenu = false;
-
-    string dirname = getDefaultDataFilename("");
-    string init_file = getDefaultDataFilename(m_RC_INIT_FILE);
-    string keys_file = getDefaultDataFilename("keys");
-    string menu_file = getDefaultDataFilename("menu");
-    string apps_file = getDefaultDataFilename("apps");
-    string overlay_file = getDefaultDataFilename("overlay");
-    string windowmenu_file = getDefaultDataFilename("windowmenu");
-
-    struct stat buf;
-
-    // is file/dir already there?
-    if (! stat(dirname.c_str(), &buf)) {
-
-        // check if anything with those name exists, if not create new
-        if (stat(init_file.c_str(), &buf))
-            create_init = true;
-        if (stat(keys_file.c_str(), &buf))
-            create_keys = true;
-        if (stat(menu_file.c_str(), &buf))
-            create_menu = true;
-        if (stat(apps_file.c_str(), &buf))
-            create_apps = true;
-        if (stat(overlay_file.c_str(), &buf))
-            create_overlay = true;
-        if (stat(windowmenu_file.c_str(), &buf))
-            create_windowmenu = true;
-
-    } else {
-#ifdef DEBUG
-        cerr <<__FILE__<<"("<<__LINE__<<"): Creating dir: " << dirname.c_str() << endl;
-#endif // DEBUG
-        _FB_USES_NLS;
-        // create directory with perm 700
-        if (mkdir(dirname.c_str(), 0700)) {
-            fprintf(stderr, _FB_CONSOLETEXT(Fluxbox, ErrorCreatingDirectory,
-                                    "Can't create %s directory",
-                                    "Can't create a directory, one %s for directory name").c_str(),
-                    dirname.c_str());
-            cerr<<endl;
-            return;
-        }
-
-        //mark creation of files
-        create_init = create_keys = create_menu = create_apps = create_overlay =
-            create_windowmenu = true;
-    }
-
-
-    // copy key configuration
-    if (create_keys)
-        FbTk::FileUtil::copyFile(DEFAULTKEYSFILE, keys_file.c_str());
-
-    // copy menu configuration
-    if (create_menu)
-        FbTk::FileUtil::copyFile(DEFAULTMENU, menu_file.c_str());
-
-    // copy apps file
-    if (create_apps)
-        FbTk::FileUtil::copyFile(DEFAULT_APPSFILE, apps_file.c_str());
-
-    // copy overlay file
-    if (create_overlay)
-        FbTk::FileUtil::copyFile(DEFAULT_OVERLAY, overlay_file.c_str());
-
-    // copy init file
-    if (create_init)
-        FbTk::FileUtil::copyFile(DEFAULT_INITFILE, init_file.c_str());
-
-    if (create_windowmenu)
-        FbTk::FileUtil::copyFile(DEFAULT_WINDOWMENU, windowmenu_file.c_str());
-
-#define CONFIG_VERSION 10
-    FbTk::Resource<int> config_version(m_resourcemanager, 0,
-            "session.configVersion", "Session.ConfigVersion");
-    if (*config_version < CONFIG_VERSION) {
-        // configs are out of date, so run fluxbox-update_configs
-
-        string commandargs = realProgramName("fluxbox-update_configs");
-        commandargs += " -rc " + init_file;
-
-#ifdef HAVE_GETPID
-        // add the fluxbox pid so fbuc can have us reload rc if necessary
-        pid_t bpid = getpid();
-        char intbuff[64];
-        sprintf(intbuff, "%d", bpid);
-        commandargs += " -pid ";
-        commandargs += intbuff;
-#endif // HAVE_GETPID
-
-        FbCommands::ExecuteCmd fbuc(commandargs, 0);
-        fbuc.execute();
-    }
-
-}
-
 void Fluxbox::handleEvent(XEvent * const e) {
+
     _FB_USES_NLS;
     m_last_event = *e;
+
 
     // it is possible (e.g. during moving) for a window
     // to mask all events to go to it
@@ -701,10 +641,7 @@ void Fluxbox::handleEvent(XEvent * const e) {
         break;
     case MapRequest: {
 
-#ifdef DEBUG
-        cerr<<"MapRequest for 0x"<<hex<<e->xmaprequest.window<<dec<<endl;
-
-#endif // DEBUG
+        fbdbg<<"MapRequest for 0x"<<hex<<e->xmaprequest.window<<dec<<endl;
 
         WinClient *winclient = searchWindow(e->xmaprequest.window);
 
@@ -750,15 +687,14 @@ void Fluxbox::handleEvent(XEvent * const e) {
 	break;
     case MappingNotify:
         // Update stored modifier mapping
-#ifdef DEBUG
-        cerr<<__FILE__<<"("<<__FUNCTION__<<"): MappingNotify"<<endl;
-#endif // DEBUG
+        fbdbg<<"MappingNotify"<<endl;
+
         if (e->xmapping.request == MappingKeyboard
             || e->xmapping.request == MappingModifier) {
             XRefreshKeyboardMapping(&e->xmapping);
             FbTk::KeyUtil::instance().init(); // reinitialise the key utils
             // reconfigure keys (if the mapping changes, they don't otherwise update
-            m_key->reload();
+            m_key->regrab();
         }
         break;
     case CreateNotify:
@@ -784,19 +720,19 @@ void Fluxbox::handleEvent(XEvent * const e) {
         // most of them are handled in FluxboxWindow::handleEvent
         // but some special cases like ewmh propertys needs to be checked
         for (AtomHandlerContainerIt it= m_atomhandler.begin();
-             it != m_atomhandler.end(); it++) {
-            if ( (*it).first->propertyNotify(*winclient, e->xproperty.atom))
+             it != m_atomhandler.end(); ++it) {
+            if ( (*it)->propertyNotify(*winclient, e->xproperty.atom))
                 break;
         }
     } break;
     case EnterNotify: {
 
         m_last_time = e->xcrossing.time;
-        BScreen *screen = 0;
 
         if (e->xcrossing.mode == NotifyGrab)
             break;
 
+        BScreen *screen = 0;
         if ((e->xcrossing.window == e->xcrossing.root) &&
             (screen = searchScreen(e->xcrossing.window))) {
             screen->imageControl().installRootColormap();
@@ -811,7 +747,7 @@ void Fluxbox::handleEvent(XEvent * const e) {
         break;
     case KeyRelease:
     case KeyPress:
-	break;
+        break;
     case ColormapNotify: {
         BScreen *screen = searchScreen(e->xcolormap.window);
 
@@ -858,14 +794,14 @@ void Fluxbox::handleEvent(XEvent * const e) {
              !winclient->fbwindow()->isMoving()))
             revertFocus();
     }
-	break;
+        break;
     case ClientMessage:
         handleClientMessage(e->xclient);
-	break;
+        break;
     default: {
 
-#ifdef HAVE_RANDR
-        if (e->type == m_randr_event_type) {
+#if defined(HAVE_RANDR) || defined(HAVE_RANDR1_2)
+        if (e->type == s_randr_event_type) {
 #ifdef HAVE_RANDR1_2
             XRRUpdateConfiguration(e);
 #endif
@@ -884,6 +820,11 @@ void Fluxbox::handleEvent(XEvent * const e) {
 void Fluxbox::handleUnmapNotify(XUnmapEvent &ue) {
 
     BScreen *screen = searchScreen(ue.event);
+
+    if (screen) {
+        /* Ignore all EnterNotify events until the pointer actually moves */
+        screen->focusControl().ignoreAtPointer();
+    }
 
     if (ue.event != ue.window && (!screen || !ue.send_event)) {
         return;
@@ -923,7 +864,7 @@ void Fluxbox::handleClientMessage(XClientMessageEvent &ce) {
     if (ce.message_type)
         atom = XGetAtomName(FbTk::App::instance()->display(), ce.message_type);
 
-    cerr<<__FILE__<<"("<<__LINE__<<"): ClientMessage. data.l[0]=0x"<<hex<<ce.data.l[0]<<
+    fbdbg<<__FILE__<<"("<<__LINE__<<"): ClientMessage. data.l[0]=0x"<<hex<<ce.data.l[0]<<
 	"  message_type=0x"<<ce.message_type<<dec<<" = \""<<atom<<"\""<<endl;
 
     if (ce.message_type && atom) XFree((char *) atom);
@@ -948,8 +889,8 @@ void Fluxbox::handleClientMessage(XClientMessageEvent &ce) {
         // note: we dont need screen nor winclient to be non-null,
         // it's up to the atomhandler to check that
         for (AtomHandlerContainerIt it= m_atomhandler.begin();
-             it != m_atomhandler.end(); it++) {
-            (*it).first->checkClientMessage(ce, screen, winclient);
+             it != m_atomhandler.end(); ++it) {
+            (*it)->checkClientMessage(ce, screen, winclient);
         }
 
     }
@@ -962,6 +903,7 @@ void Fluxbox::handleSignal(int signum) {
     static int re_enter = 0;
 
     switch (signum) {
+#ifndef _WIN32
     case SIGCHLD: // we don't want the child process to kill us
         // more than one process may have terminated
         while (waitpid(-1, 0, WNOHANG | WUNTRACED) > 0);
@@ -975,12 +917,15 @@ void Fluxbox::handleSignal(int signum) {
     case SIGUSR2:
         reconfigure();
         break;
+#endif
     case SIGSEGV:
         abort();
         break;
     case SIGFPE:
     case SIGINT:
+#ifndef _WIN32
     case SIGPIPE:
+#endif
     case SIGTERM:
         shutdown();
         break;
@@ -1003,159 +948,90 @@ void Fluxbox::handleSignal(int signum) {
 }
 
 
-void Fluxbox::update(FbTk::Subject *changedsub) {
-    //TODO: fix signaling, this does not look good
-    FluxboxWindow *fbwin = 0;
-    WinClient *client = 0;
+void Fluxbox::windowDied(Focusable &focusable) {
+    FluxboxWindow *fbwin = focusable.fbwindow();
 
-    if (typeid(*changedsub) == typeid(FluxboxWindow::WinSubject)) {
-        FluxboxWindow::WinSubject *winsub = dynamic_cast<FluxboxWindow::WinSubject *>(changedsub);
-        fbwin = &winsub->win();
-    } else if (typeid(*changedsub) == typeid(Focusable::FocusSubject)) {
-        Focusable::FocusSubject *winsub = dynamic_cast<Focusable::FocusSubject *>(changedsub);
-        fbwin = winsub->win().fbwindow();
-        if (typeid(winsub->win()) == typeid(WinClient))
-            client = dynamic_cast<WinClient *>(&winsub->win());
+    STLUtil::forAllIf(m_atomhandler, mem_fun(&AtomHandler::update),
+        CallMemFunWithRefArg<AtomHandler, FluxboxWindow&, void>(&AtomHandler::updateFrameClose, *focusable.fbwindow()));
+
+    // make sure each workspace get this
+    BScreen &scr = focusable.screen();
+    scr.removeWindow(fbwin);
+    if (FocusControl::focusedFbWindow() == fbwin)
+        FocusControl::setFocusedFbWindow(0);
+}
+
+void Fluxbox::clientDied(Focusable &focusable) {
+    WinClient &client = dynamic_cast<WinClient &>(focusable);
+
+    STLUtil::forAllIf(m_atomhandler, mem_fun(&AtomHandler::update),
+            CallMemFunWithRefArg<AtomHandler, WinClient&, void>(&AtomHandler::updateClientClose, client));
+
+    BScreen &screen = client.screen();
+
+    // At this point, we trust that this client is no longer in the
+    // client list of its frame (but it still has reference to the frame)
+    // We also assume that any remaining active one is the last focused one
+
+    // This is where we revert focus on window close
+    // NOWHERE ELSE!!!
+    if (FocusControl::focusedWindow() == &client) {
+        FocusControl::unfocusWindow(client);
+        // make sure nothing else uses this window before focus reverts
+        FocusControl::setFocusedWindow(0);
+    } else if (FocusControl::expectingFocus() == &client) {
+        FocusControl::setExpectingFocus(0);
+        revertFocus();
     }
 
-    if (fbwin && &fbwin->stateSig() == changedsub) { // state signal
-        for (AtomHandlerContainerIt it= m_atomhandler.begin();
-             it != m_atomhandler.end(); ++it) {
-            if ((*it).first->update())
-                (*it).first->updateState(*fbwin);
-        }
-        // if window changed to iconic state
-        // add to icon list
-        if (fbwin->isIconic()) {
-            fbwin->screen().addIcon(fbwin);
-            Workspace *space = fbwin->screen().getWorkspace(fbwin->workspaceNumber());
-            if (space != 0)
-                space->removeWindow(fbwin, true);
-        }
+    screen.removeClient(client);
+}
 
-        if (fbwin->isStuck()) {
-            // if we're sticky then reassociate window
-            // to all workspaces
-            BScreen &scr = fbwin->screen();
-            if (scr.currentWorkspaceID() != fbwin->workspaceNumber()) {
-                scr.reassociateWindow(fbwin,
-                                      scr.currentWorkspaceID(),
-                                      true);
-            }
-        }
-    } else if (fbwin && &fbwin->layerSig() == changedsub) { // layer signal
-        AtomHandlerContainerIt it= m_atomhandler.begin();
-        for (; it != m_atomhandler.end(); ++it) {
-            if ((*it).first->update())
-                (*it).first->updateLayer(*fbwin);
-        }
-    } else if (fbwin && &fbwin->dieSig() == changedsub) { // window death signal
-        AtomHandlerContainerIt it= m_atomhandler.begin();
-        for (; it != m_atomhandler.end(); ++it) {
-            if ((*it).first->update())
-                (*it).first->updateFrameClose(*fbwin);
-        }
+void Fluxbox::windowWorkspaceChanged(FluxboxWindow &win) {
+    STLUtil::forAllIf(m_atomhandler, mem_fun(&AtomHandler::update),
+        CallMemFunWithRefArg<AtomHandler, FluxboxWindow&, void>(&AtomHandler::updateWorkspace, win));
+}
 
-        // make sure each workspace get this
-        BScreen &scr = fbwin->screen();
-        scr.removeWindow(fbwin);
-        if (FocusControl::focusedFbWindow() == fbwin)
-            FocusControl::setFocusedFbWindow(0);
-    } else if (fbwin && &fbwin->workspaceSig() == changedsub) {  // workspace signal
-        for (AtomHandlerContainerIt it= m_atomhandler.begin();
-             it != m_atomhandler.end(); ++it) {
-            if ((*it).first->update())
-                (*it).first->updateWorkspace(*fbwin);
-        }
-    } else if (client && &client->dieSig() == changedsub) { // client death
-        for (AtomHandlerContainerIt it= m_atomhandler.begin();
-             it != m_atomhandler.end(); ++it) {
-            if ((*it).first->update())
-                (*it).first->updateClientClose(*client);
-        }
+void Fluxbox::windowStateChanged(FluxboxWindow &win) {
+    STLUtil::forAllIf(m_atomhandler, mem_fun(&AtomHandler::update),
+        CallMemFunWithRefArg<AtomHandler, FluxboxWindow&, void>(&AtomHandler::updateState, win));
 
-        BScreen &screen = client->screen();
-
-        // At this point, we trust that this client is no longer in the
-        // client list of its frame (but it still has reference to the frame)
-        // We also assume that any remaining active one is the last focused one
-
-        // This is where we revert focus on window close
-        // NOWHERE ELSE!!!
-        if (FocusControl::focusedWindow() == client) {
-            FocusControl::unfocusWindow(*client);
-            // make sure nothing else uses this window before focus reverts
-            FocusControl::setFocusedWindow(0);
-        } else if (FocusControl::expectingFocus() == client) {
-            FocusControl::setExpectingFocus(0);
-            revertFocus();
-        }
-
-        screen.removeClient(*client);
-    } else if (typeid(*changedsub) == typeid(BScreen::ScreenSubject)) {
-        BScreen::ScreenSubject *subj = dynamic_cast<BScreen::ScreenSubject *>(changedsub);
-        BScreen &screen = subj->screen();
-        if ((&(screen.workspaceCountSig())) == changedsub) {
-            for (AtomHandlerContainerIt it= m_atomhandler.begin();
-                 it != m_atomhandler.end(); ++it) {
-                if ((*it).first->update())
-                    (*it).first->updateWorkspaceCount(screen);
-            }
-        } else if ((&(screen.workspaceNamesSig())) == changedsub) {
-            for (AtomHandlerContainerIt it= m_atomhandler.begin();
-                 it != m_atomhandler.end(); ++it) {
-                if ((*it).first->update())
-                    (*it).first->updateWorkspaceNames(screen);
-            }
-        } else if ((&(screen.currentWorkspaceSig())) == changedsub) {
-            for (AtomHandlerContainerIt it= m_atomhandler.begin();
-                 it != m_atomhandler.end(); ++it) {
-                if ((*it).first->update())
-                    (*it).first->updateCurrentWorkspace(screen);
-            }
-        } else if ((&(screen.focusedWindowSig())) == changedsub) {
-            for (AtomHandlerContainerIt it= m_atomhandler.begin();
-                 it != m_atomhandler.end(); it++) {
-                (*it).first->updateFocusedWindow(screen,
-                        (FocusControl::focusedWindow() ?
-                         FocusControl::focusedWindow()->window() :
-                         0));
-            }
-        } else if ((&(screen.workspaceAreaSig())) == changedsub) {
-            for (AtomHandlerContainerIt it= m_atomhandler.begin();
-                 it != m_atomhandler.end(); ++it) {
-                if ((*it).first->update())
-                    (*it).first->updateWorkarea(screen);
-            }
-        } else if ((&(screen.clientListSig())) == changedsub) {
-            for (AtomHandlerContainerIt it= m_atomhandler.begin();
-                 it != m_atomhandler.end(); ++it) {
-                if ((*it).first->update())
-                    (*it).first->updateClientList(screen);
-            }
-        }
+    // if window changed to iconic state
+    // add to icon list
+    if (win.isIconic()) {
+        win.screen().addIcon(&win);
+        Workspace *space = win.screen().getWorkspace(win.workspaceNumber());
+        if (space != 0)
+            space->removeWindow(&win, true);
     }
+
+    if (win.isStuck()) {
+        // if we're sticky then reassociate window
+        // to all workspaces
+        BScreen &scr = win.screen();
+        if (scr.currentWorkspaceID() != win.workspaceNumber())
+            scr.reassociateWindow(&win, scr.currentWorkspaceID(), true);
+    }
+}
+
+void Fluxbox::windowLayerChanged(FluxboxWindow &win) {
+    STLUtil::forAllIf(m_atomhandler, mem_fun(&AtomHandler::update),
+        CallMemFunWithRefArg<AtomHandler, FluxboxWindow&, void>(&AtomHandler::updateLayer, win));
 }
 
 void Fluxbox::attachSignals(FluxboxWindow &win) {
-    win.hintSig().attach(this);
-    win.stateSig().attach(this);
-    win.workspaceSig().attach(this);
-    win.layerSig().attach(this);
-    win.dieSig().attach(this);
-    for (AtomHandlerContainerIt it= m_atomhandler.begin();
-         it != m_atomhandler.end(); ++it) {
-        (*it).first->setupFrame(win);
-    }
+    join(win.stateSig(), FbTk::MemFun(*this, &Fluxbox::windowStateChanged));
+    join(win.workspaceSig(), FbTk::MemFun(*this, &Fluxbox::windowWorkspaceChanged));
+    join(win.layerSig(), FbTk::MemFun(*this, &Fluxbox::windowLayerChanged));
+    join(win.dieSig(), FbTk::MemFun(*this, &Fluxbox::windowDied));
+    STLUtil::forAll(m_atomhandler,
+            CallMemFunWithRefArg<AtomHandler, FluxboxWindow&, void>(&AtomHandler::setupFrame, win));
 }
 
 void Fluxbox::attachSignals(WinClient &winclient) {
-    winclient.dieSig().attach(this);
-
-    for (AtomHandlerContainerIt it= m_atomhandler.begin();
-         it != m_atomhandler.end(); ++it) {
-        (*it).first->setupClient(winclient);
-    }
+    join(winclient.dieSig(), FbTk::MemFun(*this, &Fluxbox::clientDied));
+    STLUtil::forAll(m_atomhandler,
+            CallMemFunWithRefArg<AtomHandler, WinClient&, void>(&AtomHandler::setupClient, winclient));
 }
 
 BScreen *Fluxbox::searchScreen(Window window) {
@@ -1173,29 +1049,21 @@ BScreen *Fluxbox::searchScreen(Window window) {
 
 AtomHandler* Fluxbox::getAtomHandler(const string &name) {
     if ( name != "" ) {
-        using namespace FbTk;
-        AtomHandlerContainerIt it = find_if(m_atomhandler.begin(),
-                                            m_atomhandler.end(),
-                                            Compose(bind2nd(equal_to<string>(), name),
-                                                    Select2nd<AtomHandlerContainer::value_type>()));
-        if (it != m_atomhandler.end())
-            return (*it).first;
+
+        AtomHandlerContainerIt it;
+        for (it = m_atomhandler.begin(); it != m_atomhandler.end(); ++it) {
+            if (name == (*it)->getName())
+                return *it;
+        }
     }
     return 0;
 }
-void Fluxbox::addAtomHandler(AtomHandler *atomh, const string &name) {
-    m_atomhandler[atomh]= name;
+void Fluxbox::addAtomHandler(AtomHandler *atomh) {
+    m_atomhandler.insert(atomh);
 }
 
 void Fluxbox::removeAtomHandler(AtomHandler *atomh) {
-    for (AtomHandlerContainerIt it= m_atomhandler.begin();
-         it != m_atomhandler.end();
-         ++it) {
-        if ((*it).first == atomh) {
-            m_atomhandler.erase(it);
-            return;
-        }
-    }
+    m_atomhandler.erase(atomh);
 }
 
 WinClient *Fluxbox::searchWindow(Window window) {
@@ -1227,7 +1095,7 @@ void Fluxbox::saveWindowSearchGroup(Window window, FluxboxWindow *data) {
 }
 
 void Fluxbox::saveGroupSearch(Window window, WinClient *data) {
-    m_group_search.insert(pair<Window, WinClient *>(window, data));
+    m_group_search.insert(pair<const Window, WinClient *>(window, data));
 }
 
 
@@ -1249,7 +1117,7 @@ void Fluxbox::restart(const char *prog) {
 
     m_restarting = true;
 
-    if (prog) {
+    if (prog && *prog != '\0') {
         m_restart_argument = prog;
     }
 }
@@ -1263,9 +1131,7 @@ void Fluxbox::shutdown() {
 
     XSetInputFocus(FbTk::App::instance()->display(), PointerRoot, None, CurrentTime);
 
-    //send shutdown to all screens
-    for_each(m_screen_list.begin(),
-             m_screen_list.end(), mem_fun(&BScreen::shutdown));
+    STLUtil::forAll(m_screen_list, mem_fun(&BScreen::shutdown));
 
     sync(false);
 }
@@ -1273,9 +1139,7 @@ void Fluxbox::shutdown() {
 /// saves resources
 void Fluxbox::save_rc() {
     _FB_USES_NLS;
-    XrmDatabase new_blackboxrc = 0;
-
-    char rc_string[1024];
+    XrmDatabase new_rc = 0;
 
     string dbfile(getRcFilename());
 
@@ -1285,60 +1149,57 @@ void Fluxbox::save_rc() {
     } else
         cerr<<_FB_CONSOLETEXT(Fluxbox, BadRCFile, "rc filename is invalid!", "Bad settings file")<<endl;
 
+
     ScreenList::iterator it = m_screen_list.begin();
     ScreenList::iterator it_end = m_screen_list.end();
-
-    //Save screen resources
-
     for (; it != it_end; ++it) {
         BScreen *screen = *it;
-        int screen_number = screen->screenNumber();
+
+        std::string workspaces_string("session.screen");
+        workspaces_string += FbTk::StringUtil::number2String(screen->screenNumber());
+        workspaces_string += ".workspaceNames: ";
 
         // these are static, but may not be saved in the users resource file,
         // writing these resources will allow the user to edit them at a later
         // time... but loading the defaults before saving allows us to rewrite the
         // users changes...
 
-        // write out the users workspace names
-        sprintf(rc_string, "session.screen%d.workspaceNames: ", screen_number);
-        string workspaces_string(rc_string);
-
-        const vector<string> names = screen->getWorkspaceNames();
+        const BScreen::WorkspaceNames& names = screen->getWorkspaceNames();
         for (size_t i=0; i < names.size(); i++) {
-            workspaces_string.append(FbTk::FbStringUtil::FbStrToLocale(names[i]));
-            workspaces_string.append(",");
+            workspaces_string += FbTk::FbStringUtil::FbStrToLocale(names[i]);
+            workspaces_string += ',';
         }
 
-        XrmPutLineResource(&new_blackboxrc, workspaces_string.c_str());
+        XrmPutLineResource(&new_rc, workspaces_string.c_str());
 
     }
 
-    XrmDatabase old_blackboxrc = XrmGetFileDatabase(dbfile.c_str());
+    XrmDatabase old_rc = XrmGetFileDatabase(dbfile.c_str());
 
-    XrmMergeDatabases(new_blackboxrc, &old_blackboxrc); //merge database together
-    XrmPutFileDatabase(old_blackboxrc, dbfile.c_str());
-    XrmDestroyDatabase(old_blackboxrc);
-#ifdef DEBUG
-    cerr<<__FILE__<<"("<<__LINE__<<"): ------------ SAVING DONE"<<endl;
-#endif // DEBUG
+    XrmMergeDatabases(new_rc, &old_rc);
+    XrmPutFileDatabase(old_rc, dbfile.c_str());
+    XrmDestroyDatabase(old_rc);
+
+    fbdbg<<__FILE__<<"("<<__LINE__<<"): ------------ SAVING DONE"<<endl;
+
 }
 
 /// @return filename of resource file
 string Fluxbox::getRcFilename() {
     if (m_rc_file.empty())
-        return getDefaultDataFilename(m_RC_INIT_FILE);
+        return getDefaultDataFilename(RC_INIT_FILE);
     return m_rc_file;
 }
 
 /// Provides default filename of data file
 string Fluxbox::getDefaultDataFilename(const char *name) const {
-    return (getenv("HOME") + string("/.") + m_RC_PATH + string("/") + name);
+    return m_RC_PATH + string("/") + name;
 }
 
 /// loads resources
 void Fluxbox::load_rc() {
     _FB_USES_NLS;
-    //get resource filename
+
     string dbfile(getRcFilename());
 
     if (!dbfile.empty()) {
@@ -1365,10 +1226,7 @@ void Fluxbox::load_rc() {
         m_rc_slitlistfile.setFromString(filename.c_str());
     }
 
-    if (*m_rc_colors_per_channel < 2)
-        *m_rc_colors_per_channel = 2;
-    else if (*m_rc_colors_per_channel > 6)
-        *m_rc_colors_per_channel = 6;
+    *m_rc_colors_per_channel = FbTk::Util::clamp(*m_rc_colors_per_channel, 2, 6);
 
     if (m_rc_stylefile->empty())
         *m_rc_stylefile = DEFAULTSTYLE;
@@ -1385,16 +1243,21 @@ void Fluxbox::load_rc(BScreen &screen) {
     if (database==0)
         database = XrmGetFileDatabase(DEFAULT_INITFILE);
 
-    XrmValue value;
-    char *value_type, name_lookup[1024], class_lookup[1024];
-    int screen_number = screen.screenNumber();
-
 
     screen.removeWorkspaceNames();
 
-    sprintf(name_lookup, "session.screen%d.workspaceNames", screen_number);
-    sprintf(class_lookup, "Session.Screen%d.WorkspaceNames", screen_number);
-    if (XrmGetResource(*database, name_lookup, class_lookup, &value_type,
+    std::string screen_number = FbTk::StringUtil::number2String(screen.screenNumber());
+
+    std::string name_lookup("session.screen");
+    name_lookup += screen_number;
+    name_lookup += ".workspaceNames";
+    std::string class_lookup("session.screen");
+    class_lookup += screen_number;
+    class_lookup += ".WorkspaceNames";
+
+    XrmValue value;
+    char *value_type;
+    if (XrmGetResource(*database, name_lookup.c_str(), class_lookup.c_str(), &value_type,
                        &value)) {
 
         string values(value.addr);
@@ -1404,7 +1267,7 @@ void Fluxbox::load_rc(BScreen &screen) {
         StringUtil::removeFirstWhitespace(values);
         StringUtil::stringtok<BScreen::WorkspaceNames>(names, values, ",");
         BScreen::WorkspaceNames::iterator it;
-        for(it = names.begin(); it != names.end(); it++) {
+        for(it = names.begin(); it != names.end(); ++it) {
             if (!(*it).empty() && (*it) != "")
             screen.addWorkspaceName((*it).c_str());
         }
@@ -1440,32 +1303,21 @@ void Fluxbox::real_reconfigure() {
     for (; screen_it != screen_it_end; ++screen_it)
         load_rc(*(*screen_it));
 
-    // reconfigure all screens
-    for_each(m_screen_list.begin(), m_screen_list.end(), mem_fun(&BScreen::reconfigure));
-
-    //reconfigure keys
+    STLUtil::forAll(m_screen_list, mem_fun(&BScreen::reconfigure));
     m_key->reconfigure();
-
-    // and atomhandlers
-    for (AtomHandlerContainerIt it= m_atomhandler.begin();
-         it != m_atomhandler.end();
-         it++) {
-        (*it).first->reconfigure();
-    }
+    STLUtil::forAll(m_atomhandler, mem_fun(&AtomHandler::reconfigure));
 }
 
 BScreen *Fluxbox::findScreen(int id) {
-    ScreenList::iterator it = m_screen_list.begin();
-    ScreenList::iterator it_end = m_screen_list.end();
-    for (; it != it_end; ++it) {
-        if ((*it)->screenNumber() == id)
-            break;
-    }
 
-    if (it == m_screen_list.end())
-        return 0;
+    BScreen* result = 0;
+    ScreenList::iterator it = find_if(m_screen_list.begin(), m_screen_list.end(),
+            FbTk::CompareEqual<BScreen>(&BScreen::screenNumber, id));
 
-    return *it;
+    if (it != m_screen_list.end())
+        result = *it;
+
+    return result;
 }
 
 void Fluxbox::timed_reconfigure() {
@@ -1513,9 +1365,56 @@ bool Fluxbox::validateClient(const WinClient *client) const {
 }
 
 void Fluxbox::updateFrameExtents(FluxboxWindow &win) {
-    AtomHandlerContainerIt it = m_atomhandler.begin();
-    AtomHandlerContainerIt it_end = m_atomhandler.end();
-    for (; it != it_end; ++it ) {
-        (*it).first->updateFrameExtents(win);
+    STLUtil::forAll(m_atomhandler, 
+            CallMemFunWithRefArg<AtomHandler, FluxboxWindow&, void>(&AtomHandler::updateFrameExtents, win));
+}
+
+void Fluxbox::workspaceCountChanged( BScreen& screen ) {
+    STLUtil::forAllIf(m_atomhandler, mem_fun(&AtomHandler::update),
+            CallMemFunWithRefArg<AtomHandler, BScreen&, void>(&AtomHandler::updateWorkspaceCount, screen));
+}
+
+void Fluxbox::workspaceChanged( BScreen& screen ) {
+    STLUtil::forAllIf(m_atomhandler, mem_fun(&AtomHandler::update),
+            CallMemFunWithRefArg<AtomHandler, BScreen&, void>(&AtomHandler::updateCurrentWorkspace, screen));
+}
+
+void Fluxbox::workspaceNamesChanged(BScreen &screen) {
+    STLUtil::forAllIf(m_atomhandler, mem_fun(&AtomHandler::update),
+            CallMemFunWithRefArg<AtomHandler, BScreen&, void>(&AtomHandler::updateWorkspaceNames, screen));
+}
+
+void Fluxbox::clientListChanged(BScreen &screen) {
+    STLUtil::forAllIf(m_atomhandler, mem_fun(&AtomHandler::update),
+            CallMemFunWithRefArg<AtomHandler, BScreen&, void>(&AtomHandler::updateClientList, screen));
+}
+
+void Fluxbox::focusedWindowChanged(BScreen &screen, 
+                                   FluxboxWindow* win, 
+                                   WinClient* client) {
+
+    for (AtomHandlerContainerIt it= m_atomhandler.begin();
+         it != m_atomhandler.end(); ++it) {
+        (*it)->updateFocusedWindow(screen, client ? client->window() : 0 );
     }
 }
+
+void Fluxbox::workspaceAreaChanged(BScreen &screen) {
+    STLUtil::forAllIf(m_atomhandler, mem_fun(&AtomHandler::update),
+            CallMemFunWithRefArg<AtomHandler, BScreen&, void>(&AtomHandler::updateWorkarea, screen));
+}
+
+bool Fluxbox::haveShape() const {
+    return s_have_shape;
+}
+
+int Fluxbox::shapeEventbase() const {
+    return s_shape_eventbase;
+}
+
+Fluxbox* Fluxbox::instance() {
+    return s_singleton;
+}
+
+
+

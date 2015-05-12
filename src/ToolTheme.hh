@@ -23,7 +23,6 @@
 #ifndef TOOLTHEME_HH
 #define TOOLTHEME_HH
 
-
 #include "FbTk/TextTheme.hh"
 #include "FbTk/BorderTheme.hh"
 #include "FbTk/Texture.hh"
@@ -41,11 +40,10 @@ public:
     // textures
     const FbTk::Texture &texture() const { return *m_texture; }
     const FbTk::BorderTheme &border() const { return m_border; }
-    unsigned char alpha() const { return m_alpha; }
-    void setAlpha(unsigned char alpha) { m_alpha = alpha; }
+    int alpha() const { return m_alpha; }
+    void setAlpha(int alpha) { m_alpha = alpha; }
 
-    virtual FbTk::Subject &reconfigSig() { return FbTk::Theme::reconfigSig(); }
-    virtual const FbTk::Subject &reconfigSig() const { return FbTk::Theme::reconfigSig(); }
+    virtual FbTk::Signal<> &reconfigSig() { return FbTk::Theme::reconfigSig(); }
 
     virtual ToolTheme &operator *() { return *this; }
     virtual const ToolTheme &operator *() const { return *this; }
@@ -56,7 +54,7 @@ protected:
 private:
     FbTk::ThemeItem<FbTk::Texture> m_texture;
     FbTk::BorderTheme m_border;
-    unsigned char m_alpha;
+    int m_alpha;
 };
 
 #endif // TOOLTHEME_HH

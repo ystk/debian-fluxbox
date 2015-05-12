@@ -24,6 +24,7 @@
 
 #include "Layer.hh"
 
+#include <X11/Xlib.h>
 #include <X11/Xutil.h>
 
 #include <string>
@@ -89,10 +90,10 @@ public:
     enum Decoration {
         DECOR_NONE = 0,
         DECOR_NORMAL = DECORM_LAST - 1,
-        DECOR_TINY = DECORM_TITLEBAR|DECORM_ICONIFY|DECORM_MENU|DECORM_TAB,
-        DECOR_TOOL = DECORM_TITLEBAR|DECORM_MENU,
-        DECOR_BORDER = DECORM_BORDER|DECORM_MENU,
-        DECOR_TAB = DECORM_BORDER|DECORM_MENU|DECORM_TAB
+        DECOR_TINY = DECORM_TITLEBAR|DECORM_ICONIFY,
+        DECOR_TOOL = DECORM_TITLEBAR,
+        DECOR_BORDER = DECORM_BORDER,
+        DECOR_TAB = DECORM_BORDER|DECORM_TAB
     };
 
     enum WindowType {
@@ -112,7 +113,7 @@ public:
         focused(false),
         shaded(false), fullscreen(false), stuck(false), iconic(false),
         focus_hidden(false), icon_hidden(false),
-        maximized(0), layernum(Layer::NORMAL),
+        maximized(0), layernum(ResourceLayer::NORMAL),
         x(0), y(0), width(1), height(1) { }
 
     void saveGeometry(int x, int y, unsigned int width, unsigned int height,

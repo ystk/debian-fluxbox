@@ -1,4 +1,4 @@
-/* config.h.in.  Generated from configure.in by autoheader.  */
+/* config.h.in.  Generated from configure.ac by autoheader.  */
 
 /* Define to 1 if the `closedir' function returns void instead of `int'. */
 #undef CLOSEDIR_VOID
@@ -24,6 +24,9 @@
 /* Define to 1 if you have the <cerrno> header file. */
 #undef HAVE_CERRNO
 
+/* Define to 1 if you have the 'clock_gettime' function. */
+#undef HAVE_CLOCK_GETTIME
+
 /* Define to 1 if you have the <cmath> header file. */
 #undef HAVE_CMATH
 
@@ -32,6 +35,9 @@
 
 /* Define to 1 if you have the <cstdarg> header file. */
 #undef HAVE_CSTDARG
+
+/* Define to 1 if you have the <cstdint> header file. */
+#undef HAVE_CSTDINT
 
 /* Define to 1 if you have the <cstdio> header file. */
 #undef HAVE_CSTDIO
@@ -61,11 +67,11 @@
 /* Define to 1 if you have the `fork' function. */
 #undef HAVE_FORK
 
+/* Define to 1 if you have FRIBIDI */
+#undef HAVE_FRIBIDI
+
 /* Define to 1 if you have the `getpid' function. */
 #undef HAVE_GETPID
-
-/* Define to 1 if you have the `gettimeofday' function. */
-#undef HAVE_GETTIMEOFDAY
 
 /* Define if you have the iconv() function. */
 #undef HAVE_ICONV
@@ -88,9 +94,15 @@
 /* Define to 1 if you have the <locale.h> header file. */
 #undef HAVE_LOCALE_H
 
+/* Define to 1 if you have the 'mach_absolute_time' function. */
+#undef HAVE_MACH_ABSOLUTE_TIME
+
 /* Define to 1 if your system has a GNU libc compatible `malloc' function, and
    to 0 otherwise. */
 #undef HAVE_MALLOC
+
+/* Define to 1 if you have the <math.h> header file. */
+#undef HAVE_MATH_H
 
 /* Define to 1 if you have the <memory.h> header file. */
 #undef HAVE_MEMORY_H
@@ -116,10 +128,10 @@
 /* Define to 1 if you have the `putenv' function. */
 #undef HAVE_PUTENV
 
-/* "randr support" */
+/* Define to 1 if you have RANDR */
 #undef HAVE_RANDR
 
-/* "randr 1.2 support" */
+/* Define to 1 if you have RANDR 1.2 */
 #undef HAVE_RANDR1_2
 
 /* Define to 1 if your system has a GNU libc compatible `realloc' function,
@@ -181,7 +193,7 @@
 /* Define to 1 if you have the `strchr' function. */
 #undef HAVE_STRCHR
 
-/* Define to 1 if you have the `strftime' function. */
+/* Define to 1 if you have the 'strftime' function. */
 #undef HAVE_STRFTIME
 
 /* Define to 1 if you have the <strings.h> header file. */
@@ -201,6 +213,9 @@
 
 /* Define to 1 if you have the `strtoul' function. */
 #undef HAVE_STRTOUL
+
+/* Define to 1 if you have the `sync' function. */
+#undef HAVE_SYNC
 
 /* Define to 1 if you have the <sys/dir.h> header file, and it defines `DIR'.
    */
@@ -231,7 +246,7 @@
 /* Define to 1 if you have the <sys/types.h> header file. */
 #undef HAVE_SYS_TYPES_H
 
-/* Define to 1 if you have <sys/wait.h> that is POSIX.1 compatible. */
+/* Define to 1 if you have the <sys/wait.h> header file. */
 #undef HAVE_SYS_WAIT_H
 
 /* Define to 1 if you have the <time.h> header file. */
@@ -277,6 +292,9 @@
 /* "Native language support" */
 #undef NLS
 
+/* Name of package */
+#undef PACKAGE
+
 /* Define to the address where bug reports for this package should be sent. */
 #undef PACKAGE_BUGREPORT
 
@@ -288,6 +306,9 @@
 
 /* Define to the one symbol short name of this package. */
 #undef PACKAGE_TARNAME
+
+/* Define to the home page for this package. */
+#undef PACKAGE_URL
 
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
@@ -307,11 +328,8 @@
 /* Define to the type of arg 5 for `select'. */
 #undef SELECT_TYPE_ARG5
 
-/* "shaped window support" */
+/* Define to 1 if you have SHAPE */
 #undef SHAPE
-
-/* " compile with slit" */
-#undef SLIT
 
 /* Define to 1 if you have the ANSI C header files. */
 #undef STDC_HEADERS
@@ -319,20 +337,20 @@
 /* "timed cache" */
 #undef TIMEDCACHE
 
-/* Define to 1 if you can safely include both <sys/time.h> and <time.h>. */
-#undef TIME_WITH_SYS_TIME
-
 /* Define to 1 if your <sys/time.h> declares `struct tm'. */
 #undef TM_IN_SYS_TIME
 
-/* "Gnome 1 support" */
-#undef USE_GNOME
-
-/* " use extened window manager hints" */
-#undef USE_NEWWMSPEC
+/* "use extened window manager hints" */
+#undef USE_EWMH
 
 /* "Regular Expression support" */
 #undef USE_REGEXP
+
+/* " compile with slit" */
+#undef USE_SLIT
+
+/* " compile with systemtray" */
+#undef USE_SYSTRAY
 
 /* " compile with toolbar" */
 #undef USE_TOOLBAR
@@ -343,7 +361,10 @@
 /* "multibyte support" */
 #undef USE_XMB
 
-/* "Xinerama support" */
+/* Version number of package */
+#undef VERSION
+
+/* Define to 1 if you have XINERAMA */
 #undef XINERAMA
 
 /* Define to 1 if the X Window System is missing or not being used. */

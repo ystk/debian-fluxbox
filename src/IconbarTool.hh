@@ -28,7 +28,6 @@
 
 #include "FbTk/Container.hh"
 #include "FbTk/CachedPixmap.hh"
-#include "FbTk/Observer.hh"
 #include "FbTk/Resource.hh"
 
 #include <map>
@@ -39,7 +38,7 @@ class IconButton;
 class Focusable;
 class FocusableList;
 
-class IconbarTool: public ToolbarItem, public FbTk::Observer {
+class IconbarTool: public ToolbarItem {
 public:
     typedef std::map<Focusable *, IconButton *> IconMap;
 
@@ -54,7 +53,6 @@ public:
     void moveResize(int x, int y,
                     unsigned int width, unsigned int height);
 
-    void update(FbTk::Subject *subj);
     void show();
     void hide();
     void setAlignment(FbTk::Container::Alignment a);
@@ -72,6 +70,7 @@ public:
 
     const BScreen &screen() const { return m_screen; }
 private:
+    enum UpdateReason { LIST_ORDER, LIST_ADD, LIST_REMOVE, LIST_RESET, ALIGN };
 
     void updateSizing();
 
@@ -81,7 +80,7 @@ private:
     void renderButton(IconButton &button, bool clear = true);
     /// render all buttons
     void renderTheme();
-    void renderTheme(unsigned char alpha);
+    void renderTheme(int alpha);
     /// destroy all icons
     void deleteIcons();
     /// add or move a single window
@@ -95,12 +94,18 @@ private:
     /// add icons to the list
     void updateList();
 
+    /// called when the list emits a signal
+    void update(UpdateReason reason, Focusable *win);
+
+    void themeReconfigured();
+
     BScreen &m_screen;
     FbTk::Container m_icon_container;
     IconbarTheme &m_theme;
     FbTk::ThemeProxy<IconbarTheme> &m_focused_theme, &m_unfocused_theme;
     FbTk::CachedPixmap m_empty_pm; ///< pixmap for empty container
 
+    FbTk::SignalTracker m_tracker;
 
     std::auto_ptr<FocusableList> m_winlist;
     IconMap m_icons;
@@ -111,7 +116,7 @@ private:
     FbTk::Resource<unsigned int> m_rc_client_padding; ///< padding of the text
     FbTk::Resource<bool> m_rc_use_pixmap; ///< if iconbar should use win pixmap or not
     FbMenu m_menu;
-    unsigned char m_alpha;
+    int m_alpha;
 };
 
 #endif // ICONBARTOOL_HH

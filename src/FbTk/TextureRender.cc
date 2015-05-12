@@ -31,21 +31,11 @@
 #include "FbPixmap.hh"
 #include "GContext.hh"
 #include "I18n.hh"
+#include "StringUtil.hh"
+#include "ColorLUT.hh"
 
 #include <X11/Xutil.h>
-
 #include <iostream>
-#include <string>
-#ifdef HAVE_CSTDIO
-  #include <cstdio>
-#else
-  #include <stdio.h>
-#endif
-#ifdef HAVE_CSTRING
-  #include <cstring>
-#else
-  #include <string.h>
-#endif
 
 // mipspro has no new(nothrow)
 #if defined sgi && ! defined GCC
@@ -59,55 +49,675 @@ using std::endl;
 using std::string;
 using std::max;
 using std::min;
+using FbTk::ColorLUT::PRE_MULTIPLY_0_75;
+using FbTk::ColorLUT::BRIGHTER_4;
+using FbTk::ColorLUT::BRIGHTER_8;
+
+namespace FbTk {
+
+struct RGBA {
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+    unsigned char a; // align RGBA to 32bit, it's of no use (yet)
+
+    // use of 'static void function()' here to have
+    // simple function-pointers for interlace-code
+    // (and avoid *this 'overhead')
+
+
+    static void brighten_4(RGBA& color) {
+        color.r = BRIGHTER_4[color.r];
+        color.g = BRIGHTER_4[color.g];
+        color.b = BRIGHTER_4[color.b];
+    }
+
+    static void brighten_8(RGBA& color) {
+        color.r = BRIGHTER_8[color.r];
+        color.g = BRIGHTER_8[color.g];
+        color.b = BRIGHTER_8[color.b];
+    }
+
+    // 0.75 of old value
+    static void darken(RGBA& color) {
+        color.r = PRE_MULTIPLY_0_75[color.r];
+        color.g = PRE_MULTIPLY_0_75[color.g];
+        color.b = PRE_MULTIPLY_0_75[color.b];
+    }
+
+    static void noop(RGBA& color) { }
+
+    typedef void (*colorFunc)(RGBA&);
+    static const colorFunc pseudoInterlaceFuncs[3];
+};
+
+const RGBA::colorFunc RGBA::pseudoInterlaceFuncs[3] = {
+    RGBA::noop,
+    RGBA::brighten_8,
+    RGBA::darken
+};
+
+}
+
+namespace {
+
+struct Vec2 {
+    int x;
+    int y;
+
+    // positive: 'other' is clockwise of this
+    // negative: 'other' is counterclockwise of this
+    // 0: same line
+    int cross(int other_x, int other_y) const {
+        return (x * other_y) - (y * other_x);
+    }
+};
+
+template <typename T> int sign(T val) {
+    return (T(0) < val) - (val < T(0));
+}
+
+std::vector<char>& getGradientBuffer(size_t size) {
+    static std::vector<char> buffer;
+    if (buffer.size() < size)
+        buffer.resize(size);
+    return buffer;
+}
+
+
+void invertRGB(unsigned int w, unsigned int h, FbTk::RGBA* rgba) {
+
+    FbTk::RGBA* l = rgba;
+    FbTk::RGBA* r = rgba + (w * h);
+
+    for (--r; l < r; ++l, --r) { // swapping 32bits (RGBA) at ones.
+        std::swap(*((unsigned int*)l), *(unsigned int*)r);
+    }
+}
+
+
+void mirrorRGB(unsigned int w, unsigned int h, FbTk::RGBA* rgba) {
+
+    FbTk::RGBA* l = rgba;
+    FbTk::RGBA* r = rgba + (w * h);
+
+    for (--r; l < r; ++l, --r) {
+        *(unsigned int*)r = *(unsigned int*)l;
+    }
+}
+
+
+
+typedef void (*prepareFunc)(size_t, FbTk::RGBA*, const FbTk::Color*, const FbTk::Color*, double);
+
+//
+//
+//   To   +          .   From +.
+//        |        .          |  .
+//        |      .            |    .
+//        |    .              |      .
+//        |  .                |        .
+//        |.                  |          .
+//   From +-----------+  To   +-----------+
+//        0         size      0         size
+//
+
+void prepareLinearTable(size_t size, FbTk::RGBA* rgba,
+        const FbTk::Color* from, const FbTk::Color* to, double scale) {
+
+    const double r = from->red();
+    const double g = from->green();
+    const double b = from->blue();
+
+    const double delta_r = (to->red() - r) / (double)size;
+    const double delta_g = (to->green() - g) / (double)size;
+    const double delta_b = (to->blue() - b) / (double)size;
+
+    size_t i;
+    for (i = 0; i < size; ++i) {
+        rgba[i].r = static_cast<unsigned char>(scale * (r + (i * delta_r)));
+        rgba[i].g = static_cast<unsigned char>(scale * (g + (i * delta_g)));
+        rgba[i].b = static_cast<unsigned char>(scale * (b + (i * delta_b)));
+    }
+}
+
+void prepareSquareTable(size_t size, FbTk::RGBA* rgba,
+        const FbTk::Color* from, const FbTk::Color* to, double scale) {
+
+
+    const double r = from->red();
+    const double g = from->green();
+    const double b = from->blue();
+
+    const double delta_r = (to->red() - r);
+    const double delta_g = (to->green() - g);
+    const double delta_b = (to->blue() - b);
+
+    double s;
+    size_t i;
+    for (i = 0; i < size; ++i) {
+        s = 1.0 - ((double)(i + 1) / (double)size);
+        s *= s;
+        rgba[i].r = static_cast<unsigned char>(scale * (r + (s * delta_r)));
+        rgba[i].g = static_cast<unsigned char>(scale * (g + (s * delta_g)));
+        rgba[i].b = static_cast<unsigned char>(scale * (b + (s * delta_b)));
+    }
+}
+
+//
+//
+//   To   +     .         From +           .
+//        |    . .             |.         .
+//        |   .   .            | .       .
+//        |  .     .           |  .     .
+//        | .       .          |   .   .
+//        |.         .         |    . .
+//   From +-----------+   To   +-----.-----+
+//        0         size       0         size
+//
+void prepareMirrorTable(prepareFunc prepare, size_t size, FbTk::RGBA* rgba,
+        const FbTk::Color* from, const FbTk::Color* to, double scale) {
+
+    // for simplicity we just use given 'prepare' func to
+    // prepare 2 parts of the 'mirrorTable'
+    //
+    // 2 cases: odd and even number of 'size'
+    //
+    //   even:   f..tt..f   (size == 8)
+    //   odd:    f..t..f    (size == 7)
+    //
+    // for 'odd' we habe to 'overwrite' the last value of the left half
+    // with the (same) value for 't' again
+    //
+    //
+    // half_size for even: 4
+    // half_size for odd: 4
+    //
+    size_t half_size = (size >> 1) + (size & 1);
+
+    prepare(half_size, &rgba[0], from, to, scale);
+    mirrorRGB(size, 1, rgba);
+}
+
+inline void pseudoInterlace(FbTk::RGBA& rgba, const bool& do_interlace, const size_t& y) {
+    FbTk::RGBA::pseudoInterlaceFuncs[do_interlace + (do_interlace * (y & 1))](rgba);
+}
+
+
+
+/*
+
+   x1 y1 ---- gc1 ---- x2 y1
+     |                   |
+     |                   |
+    gc2                 gc1
+     |                   |
+     |                   |
+   x1 y2 ---- gc2 ---- x2 y2
+
+ */
+void drawBevelRectangle(FbTk::FbDrawable& d, GC gc1, GC gc2, int x1, int y1, int x2, int y2) {
+    d.drawLine(gc1, x1, y1, x2, y1);
+    d.drawLine(gc1, x2, y1, x2, y2);
+    d.drawLine(gc2, x1, y2, x2, y2);
+    d.drawLine(gc2, x1, y1, x1, y2);
+}
+
+
+
+
+
+/*
+
+    bbbbbbbbbbbbbbbbb
+    b               d           b - brighter
+    b               d           d - darker
+    b               d           D - 2 times dark
+    xdddddddddddddddD           x - darker(brighter())
+
+ */
+
+void renderBevel1(bool interlaced,
+        unsigned int width, unsigned int height,
+        FbTk::RGBA* rgba, const FbTk::Color* from, const FbTk::Color* to,
+        FbTk::ImageControl& imgctrl) {
+
+    if (! (width > 2 && height > 2))
+        return;
+
+    const size_t s = width * height;
+    size_t i;
+
+    // brighten top line and first pixel of the
+    // 2nd line
+    for (i = 0; i < width + 1; ++i) {
+        FbTk::RGBA::brighten_8(rgba[i]);
+    }
+
+    // bright and darken left and right border
+    for (i = 2 * width - 1; i < s - width; i += width) {
+        FbTk::RGBA::darken(rgba[i]); // right border
+        FbTk::RGBA::brighten_8(rgba[i + 1]);  // left border on the next line
+    }
+
+    // darken bottom line, except the first pixel
+    for (i = s - width + 1; i < s; ++i) {
+        FbTk::RGBA::darken(rgba[i]);
+    }
+
+    // and darken the lower corner pixels again
+    FbTk::RGBA::darken(rgba[i - 1]);
+    FbTk::RGBA::darken(rgba[i - width]);
+}
+
+
+/*
+     ...................
+     .bbbbbbbbbbbbbbbbd.
+     .b...............d.
+     .b...............d.    b - brighter
+     .b...............d.    d - darker
+     .bdddddddddddddddd.
+     ...................
+
+   */
+void renderBevel2(bool interlaced,
+        unsigned int width, unsigned int height,
+        FbTk::RGBA* rgba,
+        const FbTk::Color* from, const FbTk::Color* to,
+        FbTk::ImageControl& imgctrl) {
+
+    if (! (width > 4 && height > 4))
+        return;
+
+    const size_t s = width * height;
+    size_t i;
+
+    // top line, but stop 2 pixels before right border
+    for (i = (width + 1); i < ((2 * width) - 2); i++) {
+        FbTk::RGBA::brighten_8(rgba[i]);
+    }
+
+    // first darken the right border, then brighten the
+    // left border
+    for ( ; i < (s - (2 * width) - 1); i += width) {
+        FbTk::RGBA::darken(rgba[i]);
+        FbTk::RGBA::brighten_8(rgba[i + 3]);
+    }
+
+    // bottom line
+    for (i = (s - (2 * width)) + 2; i < ((s - width) - 1); ++i) {
+        FbTk::RGBA::darken(rgba[i]);
+    }
+}
+
+
+
+
+void renderHorizontalGradient(bool interlaced,
+        unsigned int width, unsigned int height,
+        FbTk::RGBA* rgba,
+        const FbTk::Color* from, const FbTk::Color* to,
+        FbTk::ImageControl& imgctrl) {
+
+    FbTk::RGBA* gradient = (FbTk::RGBA*)&getGradientBuffer(width * sizeof(FbTk::RGBA))[0];
+    prepareLinearTable(width, gradient, from, to, 1.0);
+
+    size_t y;
+    size_t x;
+    size_t i;
+
+    for (i = 0, y = 0; y < height; ++y) {
+        for (x = 0; x < width; ++x, ++i) {
+            rgba[i] = gradient[x];
+            pseudoInterlace(rgba[i], interlaced, y);
+        }
+    }
+}
+
+void renderVerticalGradient(bool interlaced,
+        unsigned int width, unsigned int height,
+        FbTk::RGBA* rgba,
+        const FbTk::Color* from, const FbTk::Color* to,
+        FbTk::ImageControl& imgctrl) {
+
+    FbTk::RGBA* gradient = (FbTk::RGBA*)&getGradientBuffer(height * sizeof(FbTk::RGBA))[0];
+    prepareLinearTable(height, gradient, from, to, 1.0);
+
+    size_t y;
+    size_t x;
+    size_t i;
+
+    for (i = 0, y = 0; y < height; ++y) {
+        for (x = 0; x < width; ++x, ++i) {
+            rgba[i] = gradient[y];
+            pseudoInterlace(rgba[i], interlaced, y);
+        }
+    }
+}
+
+
+void renderPyramidGradient(bool interlaced,
+        unsigned int width, unsigned int height,
+        FbTk::RGBA* rgba,
+        const FbTk::Color* from, const FbTk::Color* to,
+        FbTk::ImageControl& imgctrl) {
+
+
+    const size_t s = width + height;
+
+    // we need 2 gradients but use only 'one' buffer
+    FbTk::RGBA* x_gradient = (FbTk::RGBA*)&getGradientBuffer(s * sizeof(FbTk::RGBA))[0];
+    FbTk::RGBA* y_gradient = x_gradient + width;
+
+    prepareMirrorTable(prepareLinearTable, width, x_gradient, from, to, 0.5);
+    prepareMirrorTable(prepareLinearTable, height, y_gradient, from, to, 0.5);
+
+    size_t x;
+    size_t y;
+    size_t i;
+
+    for (i = 0, y = 0; y < height; ++y) {
+        for (x = 0; x < width; ++x, ++i) {
+
+            rgba[i].r = x_gradient[x].r + y_gradient[y].r;
+            rgba[i].g = x_gradient[x].g + y_gradient[y].g;
+            rgba[i].b = x_gradient[x].b + y_gradient[y].b;
+
+            pseudoInterlace(rgba[i], interlaced, y);
+        }
+    }
+}
+
+
+/*
+    .................
+      .............
+        .........
+          ....          '.' - x_gradient
+            .           ' ' - y_gradient
+          ....
+        .........
+      .............
+    .................
+ */
+void renderRectangleGradient(bool interlaced,
+        unsigned int width, unsigned int height,
+        FbTk::RGBA* rgba,
+        const FbTk::Color* from, const FbTk::Color* to,
+        FbTk::ImageControl& imgctrl) {
+
+    const size_t s = width + height;
+
+    // we need 2 gradients but use only 'one' buffer
+    FbTk::RGBA* x_gradient = (FbTk::RGBA*)&getGradientBuffer(s * sizeof(FbTk::RGBA))[0];
+    FbTk::RGBA* y_gradient = x_gradient + width;
+
+    prepareMirrorTable(prepareLinearTable, width, x_gradient, from, to, 1.0);
+    prepareMirrorTable(prepareLinearTable, height, y_gradient, from, to, 1.0);
+
+    // diagonal vectors
+    const Vec2 a = { static_cast<int>(width) - 1, static_cast<int>(height) - 1 };
+    const Vec2 b = { a.x, -a.y };
+
+    int x;
+    int y;
+    size_t i;
+
+    for (i = 0, y = 0; y < static_cast<int>(height); ++y) {
+        for (x = 0; x < static_cast<int>(width); ++x, ++i) {
+
+            // check, if the point (x, y) is left or right of the vectors
+            // 'a' and 'b'. if the point is on the same side for both 'a' and
+            // 'b' (sign(a.cross()) is equal to sign(b.cross())) then use the 
+            // y_gradient, otherwise use x_gradient
+
+            if (sign(a.cross(x, y)) * sign(b.cross(x, b.y + y)) < 0) {
+                rgba[i] = x_gradient[x];
+            } else {
+                rgba[i] = y_gradient[y];
+            }
+
+            pseudoInterlace(rgba[i], interlaced, y);
+        }
+    }
+}
+
+void renderPipeCrossGradient(bool interlaced,
+        unsigned int width, unsigned int height,
+        FbTk::RGBA* rgba,
+        const FbTk::Color* from, const FbTk::Color* to,
+        FbTk::ImageControl& imgctrl) {
+
+    size_t s = width + height;
+
+    // we need 2 gradients but use only 'one' buffer
+    FbTk::RGBA* x_gradient = (FbTk::RGBA*)&getGradientBuffer(s * sizeof(FbTk::RGBA))[0];
+    FbTk::RGBA* y_gradient = x_gradient + width;
+
+    prepareMirrorTable(prepareLinearTable, width, x_gradient, from, to, 1.0);
+    prepareMirrorTable(prepareLinearTable, height, y_gradient, from, to, 1.0);
+
+    // diagonal vectors
+    const Vec2 a = { static_cast<int>(width) - 1,  static_cast<int>(height - 1) };
+    const Vec2 b = { a.x, -a.y };
+
+    int x;
+    int y;
+    size_t i;
+
+    for (i = 0, y = 0; y < static_cast<int>(height); ++y) {
+        for (x = 0; x < static_cast<int>(width); ++x, ++i) {
+
+            // check, if the point (x, y) is left or right of the vectors
+            // 'a' and 'b'. if the point is on the same side for both 'a' and
+            // 'b' (sign(a.cross()) is equal to sign(b.cross())) then use the 
+            // x_gradient, otherwise use y_gradient
+
+            if (sign(a.cross(x, y)) * sign(b.cross(x, b.y + y)) > 0) {
+                rgba[i] = x_gradient[x];
+            } else {
+                rgba[i] = y_gradient[y];
+            }
+
+            pseudoInterlace(rgba[i], interlaced, y);
+        }
+    }
+}
+
+
+
+
+
+void renderDiagonalGradient(bool interlaced,
+        unsigned int width, unsigned int height,
+        FbTk::RGBA* rgba,
+        const FbTk::Color* from, const FbTk::Color* to,
+        FbTk::ImageControl& imgctrl) {
+
+
+    size_t s = width + height;
+
+    // we need 2 gradients but use only 'one' buffer
+    FbTk::RGBA* x_gradient = (FbTk::RGBA*)&getGradientBuffer(s * sizeof(FbTk::RGBA))[0];
+    FbTk::RGBA* y_gradient = x_gradient + width;
+
+    prepareLinearTable(width, x_gradient, from, to, 0.5);
+    prepareLinearTable(height, y_gradient, from, to, 0.5);
+
+    size_t x;
+    size_t y;
+    size_t i;
+
+    for (i = 0, y = 0; y < height; ++y) {
+        for (x = 0; x < width; ++x, ++i) {
+
+            rgba[i].r = x_gradient[x].r + y_gradient[y].r;
+            rgba[i].g = x_gradient[x].g + y_gradient[y].g;
+            rgba[i].b = x_gradient[x].b + y_gradient[y].b;
+
+            pseudoInterlace(rgba[i], interlaced, y);
+        }
+    }
+}
+
+
+
+
+void renderEllipticGradient(bool interlaced,
+        unsigned int width, unsigned int height,
+        FbTk::RGBA* rgba,
+        const FbTk::Color* from, const FbTk::Color* to,
+        FbTk::ImageControl& imgctrl) {
+
+    const double r = to->red();
+    const double g = to->green();
+    const double b = to->blue();
+
+    const double dr = r - from->red();
+    const double dg = g - from->green();
+    const double db = b - from->blue();
+
+    const double w2 = width / 2.0;
+    const double h2 = height / 2.0;
+
+    const double sw = 1.0 / (w2 * w2);
+    const double sh = 1.0 / (h2 * h2);
+
+    size_t i;
+    int x;
+    int y;
+    double _x;
+    double _y;
+    double d;
+
+    for (i = 0, y = 0; y < height; ++y) {
+        for (x = 0; x < width; ++x, ++i) {
+
+            _x = x - w2;
+            _y = y - h2;
+
+            d = ((_x * _x * sw) + (_y * _y * sh)) / 2.0;
+
+            rgba[i].r = (unsigned char)(r - (d * dr));
+            rgba[i].g = (unsigned char)(g - (d * dg));
+            rgba[i].b = (unsigned char)(b - (d * db));
+
+            pseudoInterlace(rgba[i], interlaced, y);
+        }
+    }
+}
+
+
+
+
+void renderCrossDiagonalGradient(bool interlaced,
+        unsigned int width, unsigned int height,
+        FbTk::RGBA* rgba,
+        const FbTk::Color* from, const FbTk::Color* to,
+        FbTk::ImageControl& imgctrl) {
+
+    size_t s = width + height;
+
+    // we need 2 gradients but use only 'one' buffer
+    FbTk::RGBA* x_gradient = (FbTk::RGBA*)&getGradientBuffer(s * sizeof(FbTk::RGBA))[0];
+    FbTk::RGBA* y_gradient = x_gradient + width;
+
+    prepareLinearTable(width, x_gradient, to, from, 0.5);
+    prepareLinearTable(height, y_gradient, from, to, 0.5);
+
+    size_t x;
+    size_t y;
+    size_t i;
+
+    for (i = 0, y = 0; y < height; ++y) {
+        for (x = 0; x < width; ++x, ++i) {
+
+            rgba[i].r = x_gradient[x].r + y_gradient[y].r;
+            rgba[i].g = x_gradient[x].g + y_gradient[y].g;
+            rgba[i].b = x_gradient[x].b + y_gradient[y].b;
+
+            pseudoInterlace(rgba[i], interlaced, y);
+        }
+    }
+}
+
+
+
+struct RendererActions {
+    unsigned int type;
+    void (*render)(bool, unsigned int, unsigned int,
+            FbTk::RGBA*,
+            const FbTk::Color*, const FbTk::Color*,
+            FbTk::ImageControl&);
+};
+
+const RendererActions render_gradient_actions[] = {
+    { FbTk::Texture::DIAGONAL, renderDiagonalGradient},
+    { FbTk::Texture::ELLIPTIC, renderEllipticGradient },
+    { FbTk::Texture::HORIZONTAL, renderHorizontalGradient },
+    { FbTk::Texture::PYRAMID, renderPyramidGradient },
+    { FbTk::Texture::RECTANGLE, renderRectangleGradient },
+    { FbTk::Texture::VERTICAL, renderVerticalGradient },
+    { FbTk::Texture::CROSSDIAGONAL, renderCrossDiagonalGradient },
+    { FbTk::Texture::PIPECROSS, renderPipeCrossGradient }
+};
+
+const RendererActions render_bevel_actions[] = {
+    { FbTk::Texture::BEVEL1, renderBevel1 },
+    { FbTk::Texture::BEVEL2, renderBevel2 }
+};
+
+}
 
 namespace FbTk {
 
 TextureRender::TextureRender(ImageControl &imgctrl,
                              unsigned int w, unsigned int h,
-                             FbTk::Orientation orient,
-                             XColor *_colors, size_t num_colors):
+                             FbTk::Orientation orient):
     control(imgctrl),
-    colors(_colors),
-    ncolors(ncolors),
     cpc(imgctrl.colorsPerChannel()),
     cpccpc(cpc * cpc),
-    red(0), green(0), blue(0),
+    rgba(0),
     orientation(orient),
-    width(static_cast<signed>((w > 0 ? w : 1))), height(static_cast<signed>(h > 0 ? h : 1)),
-    xtable(0), ytable(0) {
+    width(w),
+    height(h) {
 
-    unsigned int texture_max_width = WidthOfScreen(ScreenOfDisplay(FbTk::App::instance()->display(), imgctrl.screenNumber())) * 2;
-    unsigned int texture_max_height = HeightOfScreen(ScreenOfDisplay(FbTk::App::instance()->display(), imgctrl.screenNumber())) * 2;
+    Display* d = App::instance()->display();
+    Screen* s = ScreenOfDisplay(d, imgctrl.screenNumber());
+
+    unsigned int texture_max_width = WidthOfScreen(s) * 2;
+    unsigned int texture_max_height = HeightOfScreen(s) * 2;
 
     _FB_USES_NLS;
     // clamp to "normal" size
     if (width > texture_max_width) {
-        cerr<<"TextureRender: "<<_FBTK_CONSOLETEXT(Error, BigWidth, "Warning! Width > 3200 setting Width = 3200", "Image width seems too big, clamping")<<endl;
+        cerr<<"TextureRender: "<<_FBTK_CONSOLETEXT(Error, BigWidth, 
+                "Warning! Width > 3200 setting Width = 3200", "Image width seems too big, clamping")
+            <<endl;
         width = texture_max_width;
     }
 
     if (height > texture_max_height) {
-        cerr<<"TextureRender: "<<_FBTK_CONSOLETEXT(Error, BigHeight, "Warning! Height > 3200 setting Height = 3200", "Image height seems too big, clamping")<<endl;
+        cerr<<"TextureRender: "<<_FBTK_CONSOLETEXT(Error, BigHeight,
+                "Warning! Height > 3200 setting Height = 3200", "Image height seems too big, clamping")
+            <<endl;
         height = texture_max_height;
     }
-
-
-    imgctrl.colorTables(&red_table, &green_table, &blue_table,
-                        &red_offset, &green_offset, &blue_offset,
-                        &red_bits, &green_bits, &blue_bits);
-
 }
 
 
 TextureRender::~TextureRender() {
-    if (red != 0) delete [] red;
-    if (green != 0) delete [] green;
-    if (blue != 0) delete [] blue;
+    if (rgba)
+        delete[] rgba;
 }
 
 
 Pixmap TextureRender::render(const FbTk::Texture &texture) {
-    if (texture.pixmap().drawable() != 0)
+
+    if (width == 0 || height == 0)
+        return None;
+    else if (texture.pixmap().drawable() != 0)
         return renderPixmap(texture);
     else if (texture.type() & FbTk::Texture::PARENTRELATIVE)
         return ParentRelative;
@@ -123,36 +733,16 @@ Pixmap TextureRender::render(const FbTk::Texture &texture) {
 
 void TextureRender::allocateColorTables() {
 
-    _FB_USES_NLS;
+    const size_t s = width * height;
+    rgba = FB_new_nothrow RGBA[s];
+    if (rgba == 0) {
 
-    const size_t size = width * height;
-    red = FB_new_nothrow unsigned char[size];
-
-    if (red == 0) {
-        char sbuf[128];
-        sprintf(sbuf, "%ld", (long int) size);
-        throw string("TextureRender::TextureRender(): " +
-              string(_FBTK_CONSOLETEXT(Error, OutOfMemoryRed, "Out of memory while allocating red buffer.", "")) + string(sbuf));
+        _FB_USES_NLS;
+        throw string("TextureRender::TextureRender(): ") +
+              string(_FBTK_CONSOLETEXT(Error, OutOfMemoryRed,
+                      "Out of memory while allocating red buffer.", "")) +
+              StringUtil::number2String(s);
     }
-
-
-    green = FB_new_nothrow unsigned char[size];
-    if (green == 0) {
-        char sbuf[128];
-        sprintf(sbuf, "%ld", (long int) size);
-        throw string("TextureRender::TextureRender(): " +
-              string(_FBTK_CONSOLETEXT(Error, OutOfMemoryGreen, "Out of memory while allocating green buffer.", ""))+ string(sbuf));
-    }
-
-    blue = FB_new_nothrow unsigned char[size];
-    if (blue == 0) {
-        char sbuf[128];
-        sprintf(sbuf, "%ld", (long int) size);
-        throw string("TextureRender::TextureRender(): " +
-              string(_FBTK_CONSOLETEXT(Error, OutOfMemoryBlue, "Out of memory while allocating blue buffer.", ""))+ string(sbuf));
-    }
-
-
 }
 
 Pixmap TextureRender::renderSolid(const FbTk::Texture &texture) {
@@ -164,13 +754,16 @@ Pixmap TextureRender::renderSolid(const FbTk::Texture &texture) {
 
     if (pixmap.drawable() == None) {
         _FB_USES_NLS;
-        cerr<<"FbTk::TextureRender::render_solid(): "<<_FBTK_CONSOLETEXT(Error, CreatePixmap, "Error creating pixmap", "Couldn't create a pixmap - image - for some reason")<<endl;
+        cerr << "FbTk::TextureRender::render_solid(): "
+            <<_FBTK_CONSOLETEXT(Error, CreatePixmap, "Error creating pixmap", "Couldn't create a pixmap - image - for some reason")
+            << endl;
         return None;
     }
 
 
-    FbTk::GContext gc(pixmap),
-        hgc(pixmap), lgc(pixmap);
+    FbTk::GContext gc(pixmap);
+    FbTk::GContext hgc(pixmap);
+    FbTk::GContext lgc(pixmap);
 
     gc.setForeground(texture.color());
     gc.setFillStyle(FillSolid);
@@ -179,61 +772,28 @@ Pixmap TextureRender::renderSolid(const FbTk::Texture &texture) {
 
     pixmap.fillRectangle(gc.gc(), 0, 0, width, height);
 
-    using namespace FbTk;
-
     if (texture.type() & Texture::INTERLACED) {
         lgc.setForeground(texture.colorTo());
-        register unsigned int i = 0;
-        for (; i < height; i += 2)
-            pixmap.drawLine(lgc.gc(), 0, i, width, i);
+        unsigned int i;
+        for (i = 0; i < height; i += 2)
+            pixmap.drawLine(lgc.gc(), 0, i, width - 1, i);
 
     }
 
     lgc.setForeground(texture.loColor());
 
-    if (texture.type() & Texture::BEVEL1) {
+
+    if (height > 1 && width > 1 && texture.type() & Texture::BEVEL1) {
         if (texture.type() & Texture::RAISED) {
-            pixmap.drawLine(lgc.gc(),
-                            0, height - 1, width - 1, height - 1);
-            pixmap.drawLine(lgc.gc(),
-                            width - 1, height - 1, width - 1, 0);
-
-            pixmap.drawLine(hgc.gc(),
-                            0, 0, width - 1, 0);
-            pixmap.drawLine(hgc.gc(),
-                            0, height - 1, 0, 0);
+            drawBevelRectangle(pixmap, lgc.gc(), hgc.gc(), 0, height - 1, width - 1, 0);
         } else if (texture.type() & Texture::SUNKEN) {
-            pixmap.drawLine(hgc.gc(),
-                            0, height - 1, width - 1, height - 1);
-            pixmap.drawLine(hgc.gc(),
-                            width - 1, height - 1, width - 1, 0);
-
-            pixmap.drawLine(lgc.gc(),
-                            0, 0, width - 1, 0);
-            pixmap.drawLine(lgc.gc(),
-                            0, height - 1, 0, 0);
+            drawBevelRectangle(pixmap, hgc.gc(), lgc.gc(), 0, height - 1, width - 1, 0);
         }
-    } else if (texture.type() & Texture::BEVEL2) {
+    } else if (width > 2 && height > 2 && texture.type() & Texture::BEVEL2) {
         if (texture.type() & Texture::RAISED) {
-            pixmap.drawLine(lgc.gc(),
-                            1, height - 3, width - 3, height - 3);
-            pixmap.drawLine(lgc.gc(),
-                            width - 3, height - 3, width - 3, 1);
-
-            pixmap.drawLine(hgc.gc(),
-                            1, 1, width - 3, 1);
-            pixmap.drawLine(hgc.gc(),
-                            1, height - 3, 1, 1);
+            drawBevelRectangle(pixmap, lgc.gc(), hgc.gc(), 1, height - 2, width - 2, 1);
         } else if (texture.type() & Texture::SUNKEN) {
-            pixmap.drawLine(hgc.gc(),
-                            1, height - 3, width - 3, height - 3);
-            pixmap.drawLine(hgc.gc(),
-                            width - 3, height - 3, width - 3, 1);
-
-            pixmap.drawLine(lgc.gc(),
-                            1, 1, width - 3, 1);
-            pixmap.drawLine(lgc.gc(),
-                            1, height - 3, 1, 1);
+            drawBevelRectangle(pixmap, hgc.gc(), lgc.gc(), 1, height - 2, width - 2, 1);
         }
     }
 
@@ -243,55 +803,40 @@ Pixmap TextureRender::renderSolid(const FbTk::Texture &texture) {
 
 Pixmap TextureRender::renderGradient(const FbTk::Texture &texture) {
 
-    bool inverted = false;
-
     // invert our width and height if necessary
     translateSize(orientation, width, height);
 
-    using namespace FbTk;
+    const Color* from = &(texture.color());
+    const Color* to = &(texture.colorTo());
 
-    interlaced = texture.type() & Texture::INTERLACED;
+    bool interlaced = texture.type() & Texture::INTERLACED;
+    bool inverted = texture.type() & Texture::INVERT;
 
     if (texture.type() & Texture::SUNKEN) {
-        from = &(texture.colorTo());
-        to = &(texture.color());
-
-        if (! (texture.type() & Texture::INVERT))
-            inverted = true;
-    } else {
-        from = &(texture.color());
-        to = &(texture.colorTo());
-
-        if (texture.type() & Texture::INVERT)
-            inverted = true;
+        std::swap(from, to);
+        inverted = !inverted;
     }
 
-    control.getGradientBuffers(width, height, &xtable, &ytable);
+    size_t i;
+    // draw gradient
+    for (i = 0; i < sizeof(render_gradient_actions)/sizeof(RendererActions); ++i) {
+        if (render_gradient_actions[i].type & texture.type()) {
+            render_gradient_actions[i].render(interlaced, width, height, rgba, from, to, control);
+            break;
+        }
+    }
 
-    if (texture.type() & Texture::DIAGONAL)
-        dgradient();
-    else if (texture.type() & Texture::ELLIPTIC)
-        egradient();
-    else if (texture.type() & Texture::HORIZONTAL)
-        hgradient();
-    else if (texture.type() & Texture::PYRAMID)
-        pgradient();
-    else if (texture.type() & Texture::RECTANGLE)
-        rgradient();
-    else if (texture.type() & Texture::VERTICAL)
-        vgradient();
-    else if (texture.type() & Texture::CROSSDIAGONAL)
-        cdgradient();
-    else if (texture.type() & Texture::PIPECROSS)
-        pcgradient();
+    // draw bevel
+    for (i = 0; i < sizeof(render_bevel_actions)/sizeof(RendererActions); ++i) {
+        if (texture.type() & render_bevel_actions[i].type) {
+            render_bevel_actions[i].render(interlaced, width, height, rgba, from, to, control);
+            break;
+        }
+    }
 
-    if (texture.type() & Texture::BEVEL1)
-        bevel1();
-    else if (texture.type() & Texture::BEVEL2)
-        bevel2();
-
-    if (inverted)
-        invert();
+    if (inverted) {
+        invertRGB(width, height, rgba);
+    }
 
     return renderPixmap();
 
@@ -324,120 +869,125 @@ Pixmap TextureRender::renderPixmap(const FbTk::Texture &src_texture) {
     return pm_copy.release();
 }
 
+
+
+
+
+
+
+
 XImage *TextureRender::renderXImage() {
+
     Display *disp = FbTk::App::instance()->display();
-    XImage *image =
-        XCreateImage(disp,
-                     DefaultVisual(disp, control.screenNumber()), control.depth(), ZPixmap, 0, 0,
+    XImage *image = XCreateImage(disp,
+                     control.visual(), control.depth(), ZPixmap, 0, 0,
                      width, height, 32, 0);
 
     if (! image) {
         _FB_USES_NLS;
-        cerr << "FbTk::TextureRender::renderXImage(): " << _FBTK_CONSOLETEXT(Error, CreateXImage, "Can't create XImage", "Couldn't create an XImage") << "." << endl;
+        cerr << "FbTk::TextureRender::renderXImage(): "
+            << _FBTK_CONSOLETEXT(Error, CreateXImage, "Can't create XImage", "Couldn't create an XImage")
+            << "." << endl;
         return 0;
     }
 
     image->data = 0;
 
+
+    const unsigned char *red_table;
+    const unsigned char *green_table;
+    const unsigned char *blue_table;
+    int red_offset;
+    int green_offset;
+    int blue_offset;
+
+    control.colorTables(&red_table, &green_table, &blue_table,
+                        &red_offset, &green_offset, &blue_offset,
+                        0, 0, 0);
+
     unsigned char *d = new unsigned char[image->bytes_per_line * (height + 1)];
-    register unsigned int x, y, r, g, b, o, offset;
+    unsigned int x, y, r, g, b, offset;
 
     unsigned char *pixel_data = d, *ppixel_data = d;
     unsigned long pixel;
 
-    o = image->bits_per_pixel + ((image->byte_order == MSBFirst) ? 1 : 0);
+    unsigned int o = image->bits_per_pixel + ((image->byte_order == MSBFirst) ? 1 : 0);
+
+
+#define TRANSFER_PIXELS(pixel_stmt, transfer_stmt) { \
+    RGBA _rgba; \
+    for (y = 0, offset = 0; y < height; y++) { \
+        for (x = 0; x < width; x++, offset++) { \
+            _rgba = rgba[offset]; \
+            r = red_table[_rgba.r]; \
+            g = green_table[_rgba.g]; \
+            b = blue_table[_rgba.b]; \
+            pixel = pixel_stmt; \
+            transfer_stmt; \
+        } \
+        pixel_data = (ppixel_data += image->bytes_per_line); \
+    } }
+
 
     switch (control.visual()->c_class) {
     case StaticColor:
     case PseudoColor:
-        for (y = 0, offset = 0; y < height; y++) {
-            for (x = 0; x < width; x++, offset++) {
-                r = red_table[red[offset]];
-                g = green_table[green[offset]];
-                b = blue_table[blue[offset]];
-
-                pixel = (r * cpccpc) + (g * cpc) + b;
-                *pixel_data++ = colors[pixel].pixel;
-            }
-
-            pixel_data = (ppixel_data += image->bytes_per_line);
-        }
-
+        TRANSFER_PIXELS((r * cpccpc) + (g * cpc) + b,
+                *pixel_data++ = control.colors()[pixel].pixel);
         break;
 
     case TrueColor:
-        for (y = 0, offset = 0; y < height; y++) {
-            for (x = 0; x < width; x++, offset++) {
-                r = red_table[red[offset]];
-                g = green_table[green[offset]];
-                b = blue_table[blue[offset]];
-
-                pixel = (r << red_offset) | (g << green_offset) | (b << blue_offset);
-
-                switch (o) {
-                case	8: //	8bpp
+        switch (o) {
+        case 8:
+            TRANSFER_PIXELS((r << red_offset)|(g << green_offset)|(b << blue_offset),
+                    *pixel_data++ = pixel);
+            break;
+        case 16:
+            TRANSFER_PIXELS((r << red_offset)|(g << green_offset)|(b << blue_offset),
                     *pixel_data++ = pixel;
-                    break;
-
-                case 16: // 16bpp LSB
+                    *pixel_data++ = pixel >> 8);
+            break;
+        case 17:
+            TRANSFER_PIXELS((r << red_offset)|(g << green_offset)|(b << blue_offset),
+                    *pixel_data++ = pixel >> 8;
+                    *pixel_data++ = pixel);
+            break;
+        case 24:
+            TRANSFER_PIXELS((r << red_offset)|(g << green_offset)|(b << blue_offset),
                     *pixel_data++ = pixel;
                     *pixel_data++ = pixel >> 8;
-                    break;
-
-                case 17: // 16bpp MSB
+                    *pixel_data++ = pixel >> 16);
+            break;
+        case 25:
+            TRANSFER_PIXELS((r << red_offset)|(g << green_offset)|(b << blue_offset),
+                    *pixel_data++ = pixel >> 16;
                     *pixel_data++ = pixel >> 8;
-                    *pixel_data++ = pixel;
-                    break;
-
-                case 24: // 24bpp LSB
+                    *pixel_data++ = pixel);
+            break;
+        case 32:
+            TRANSFER_PIXELS((r << red_offset)|(g << green_offset)|(b << blue_offset),
                     *pixel_data++ = pixel;
                     *pixel_data++ = pixel >> 8;
                     *pixel_data++ = pixel >> 16;
-                    break;
-
-                case 25: // 24bpp MSB
-                    *pixel_data++ = pixel >> 16;
-                    *pixel_data++ = pixel >> 8;
-                    *pixel_data++ = pixel;
-                    break;
-
-                case 32: // 32bpp LSB
-                    *pixel_data++ = pixel;
-                    *pixel_data++ = pixel >> 8;
-                    *pixel_data++ = pixel >> 16;
-                    *pixel_data++ = pixel >> 24;
-                    break;
-
-                case 33: // 32bpp MSB
+                    *pixel_data++ = pixel >> 24);
+            break;
+        case 33:
+            TRANSFER_PIXELS((r << red_offset)|(g << green_offset)|(b << blue_offset),
                     *pixel_data++ = pixel >> 24;
                     *pixel_data++ = pixel >> 16;
                     *pixel_data++ = pixel >> 8;
-                    *pixel_data++ = pixel;
-                    break;
-                }
-            }
-
-            pixel_data = (ppixel_data += image->bytes_per_line);
+                    *pixel_data++ = pixel);
+            break;
         }
 
         break;
 
     case StaticGray:
     case GrayScale:
-        for (y = 0, offset = 0; y < height; y++) {
-            for (x = 0; x < width; x++, offset++) {
-                r = *(red_table + *(red + offset));
-                g = *(green_table + *(green + offset));
-                b = *(blue_table + *(blue + offset));
+        TRANSFER_PIXELS(((r * 30) + (g * 59) + (b * 11)) / 100,
+                    *pixel_data++ = control.colors()[pixel].pixel);
 
-                g = ((r * 30) + (g * 59) + (b * 11)) / 100;
-                *pixel_data++ = colors[g].pixel;
-            }
-
-            pixel_data = (ppixel_data += image->bytes_per_line);
-        }
-
-	break;
+        break;
 
     default:
         _FB_USES_NLS;
@@ -448,19 +998,23 @@ XImage *TextureRender::renderXImage() {
         return (XImage *) 0;
     }
 
+#undef TRANSFER_PIXELS
+
     image->data = (char *) d;
     return image;
 }
 
 
 Pixmap TextureRender::renderPixmap() {
+
     Display *disp = FbTk::App::instance()->display();
     FbPixmap pixmap(RootWindow(disp, control.screenNumber()),
                     width, height, control.depth());
 
     if (pixmap.drawable() == None) {
         _FB_USES_NLS;
-        cerr<<"FbTk::TextureRender::renderPixmap(): "<<_FBTK_CONSOLETEXT(Error, CreatePixmap, "Error creating pixmap", "Couldn't create a pixmap - image - for some reason")<<endl;
+        cerr << "FbTk::TextureRender::renderPixmap(): "
+            << _FBTK_CONSOLETEXT(Error, CreatePixmap, "Error creating pixmap", "Couldn't create a pixmap - image - for some reason") << endl;
         return None;
     }
 
@@ -490,1086 +1044,5 @@ Pixmap TextureRender::renderPixmap() {
 }
 
 
-void TextureRender::bevel1() {
-    if (! (width > 2 && height > 2))
-        return;
-
-    unsigned char *pr = red, *pg = green, *pb = blue;
-
-    register unsigned char r, g, b, rr ,gg ,bb;
-    register unsigned int w = width, h = height - 1, wh = w * h;
-
-    while (--w) {
-        r = *pr;
-        rr = r + (r >> 1);
-        if (rr < r) rr = ~0;
-        g = *pg;
-        gg = g + (g >> 1);
-        if (gg < g) gg = ~0;
-        b = *pb;
-        bb = b + (b >> 1);
-        if (bb < b) bb = ~0;
-
-        *pr = rr;
-        *pg = gg;
-        *pb = bb;
-
-        r = *(pr + wh);
-        rr = (r >> 2) + (r >> 1);
-        if (rr > r) rr = 0;
-        g = *(pg + wh);
-        gg = (g >> 2) + (g >> 1);
-        if (gg > g) gg = 0;
-        b = *(pb + wh);
-        bb = (b >> 2) + (b >> 1);
-        if (bb > b) bb = 0;
-
-        *((pr++) + wh) = rr;
-        *((pg++) + wh) = gg;
-        *((pb++) + wh) = bb;
-    }
-
-    r = *pr;
-    rr = r + (r >> 1);
-    if (rr < r) rr = ~0;
-    g = *pg;
-    gg = g + (g >> 1);
-    if (gg < g) gg = ~0;
-    b = *pb;
-    bb = b + (b >> 1);
-    if (bb < b) bb = ~0;
-
-    *pr = rr;
-    *pg = gg;
-    *pb = bb;
-
-    r = *(pr + wh);
-    rr = (r >> 2) + (r >> 1);
-    if (rr > r) rr = 0;
-    g = *(pg + wh);
-    gg = (g >> 2) + (g >> 1);
-    if (gg > g) gg = 0;
-    b = *(pb + wh);
-    bb = (b >> 2) + (b >> 1);
-    if (bb > b) bb = 0;
-
-    *(pr + wh) = rr;
-    *(pg + wh) = gg;
-    *(pb + wh) = bb;
-
-    pr = red + width;
-    pg = green + width;
-    pb = blue + width;
-
-    while (--h) {
-        r = *pr;
-        rr = r + (r >> 1);
-        if (rr < r) rr = ~0;
-        g = *pg;
-        gg = g + (g >> 1);
-        if (gg < g) gg = ~0;
-        b = *pb;
-        bb = b + (b >> 1);
-        if (bb < b) bb = ~0;
-
-        *pr = rr;
-        *pg = gg;
-        *pb = bb;
-
-        pr += width - 1;
-        pg += width - 1;
-        pb += width - 1;
-
-        r = *pr;
-        rr = (r >> 2) + (r >> 1);
-        if (rr > r) rr = 0;
-        g = *pg;
-        gg = (g >> 2) + (g >> 1);
-        if (gg > g) gg = 0;
-        b = *pb;
-        bb = (b >> 2) + (b >> 1);
-        if (bb > b) bb = 0;
-
-        *(pr++) = rr;
-        *(pg++) = gg;
-        *(pb++) = bb;
-    }
-
-    r = *pr;
-    rr = r + (r >> 1);
-    if (rr < r) rr = ~0;
-    g = *pg;
-    gg = g + (g >> 1);
-    if (gg < g) gg = ~0;
-    b = *pb;
-    bb = b + (b >> 1);
-    if (bb < b) bb = ~0;
-
-    *pr = rr;
-    *pg = gg;
-    *pb = bb;
-
-    pr += width - 1;
-    pg += width - 1;
-    pb += width - 1;
-
-    r = *pr;
-    rr = (r >> 2) + (r >> 1);
-    if (rr > r) rr = 0;
-    g = *pg;
-    gg = (g >> 2) + (g >> 1);
-    if (gg > g) gg = 0;
-    b = *pb;
-    bb = (b >> 2) + (b >> 1);
-    if (bb > b) bb = 0;
-
-    *pr = rr;
-    *pg = gg;
-    *pb = bb;
-}
-
-
-void TextureRender::bevel2() {
-    if (! (width > 4 && height > 4))
-        return;
-
-    unsigned char r, g, b, rr ,gg ,bb, *pr = red + width + 1,
-        *pg = green + width + 1, *pb = blue + width + 1;
-    unsigned int w = width - 2, h = height - 1, wh = width * (height - 3);
-
-    while (--w) {
-        r = *pr;
-        rr = r + (r >> 1);
-        if (rr < r) rr = ~0;
-        g = *pg;
-        gg = g + (g >> 1);
-        if (gg < g) gg = ~0;
-        b = *pb;
-        bb = b + (b >> 1);
-        if (bb < b) bb = ~0;
-
-        *pr = rr;
-        *pg = gg;
-        *pb = bb;
-
-        r = *(pr + wh);
-        rr = (r >> 2) + (r >> 1);
-        if (rr > r) rr = 0;
-        g = *(pg + wh);
-        gg = (g >> 2) + (g >> 1);
-        if (gg > g) gg = 0;
-        b = *(pb + wh);
-        bb = (b >> 2) + (b >> 1);
-        if (bb > b) bb = 0;
-
-        *((pr++) + wh) = rr;
-        *((pg++) + wh) = gg;
-        *((pb++) + wh) = bb;
-    }
-
-    pr = red + width;
-    pg = green + width;
-    pb = blue + width;
-
-    while (--h) {
-        r = *pr;
-        rr = r + (r >> 1);
-        if (rr < r) rr = ~0;
-        g = *pg;
-        gg = g + (g >> 1);
-        if (gg < g) gg = ~0;
-        b = *pb;
-        bb = b + (b >> 1);
-        if (bb < b) bb = ~0;
-
-        *(++pr) = rr;
-        *(++pg) = gg;
-        *(++pb) = bb;
-
-        pr += width - 3;
-        pg += width - 3;
-        pb += width - 3;
-
-        r = *pr;
-        rr = (r >> 2) + (r >> 1);
-        if (rr > r) rr = 0;
-        g = *pg;
-        gg = (g >> 2) + (g >> 1);
-        if (gg > g) gg = 0;
-        b = *pb;
-        bb = (b >> 2) + (b >> 1);
-        if (bb > b) bb = 0;
-
-        *(pr++) = rr;
-        *(pg++) = gg;
-        *(pb++) = bb;
-
-        pr++; pg++; pb++;
-    }
-}
-
-
-void TextureRender::invert() {
-    register unsigned int i, j, wh = (width * height) - 1;
-    unsigned char tmp;
-
-    for (i = 0, j = wh; j > i; j--, i++) {
-        tmp = *(red + j);
-        *(red + j) = *(red + i);
-        *(red + i) = tmp;
-
-        tmp = *(green + j);
-        *(green + j) = *(green + i);
-        *(green + i) = tmp;
-
-        tmp = *(blue + j);
-        *(blue + j) = *(blue + i);
-        *(blue + i) = tmp;
-    }
-}
-
-
-void TextureRender::dgradient() {
-    // diagonal gradient code was written by Mike Cole <mike@mydot.com>
-    // modified for interlacing by Brad Hughes
-
-    float drx, dgx, dbx, dry, dgy, dby, yr = 0.0, yg = 0.0, yb = 0.0,
-        xr = (float) from->red(),
-        xg = (float) from->green(),
-        xb = (float) from->blue();
-    unsigned char *pr = red, *pg = green, *pb = blue;
-    unsigned int w = width * 2, h = height * 2;
-    unsigned int *xt = xtable, *yt = ytable;
-
-    register unsigned int x, y;
-
-    dry = drx = (float) (to->red() - from->red());
-    dgy = dgx = (float) (to->green() - from->green());
-    dby = dbx = (float) (to->blue() - from->blue());
-
-    // Create X table
-    drx /= w;
-    dgx /= w;
-    dbx /= w;
-
-    for (x = 0; x < width; x++) {
-        *(xt++) = (unsigned char) (xr);
-        *(xt++) = (unsigned char) (xg);
-        *(xt++) = (unsigned char) (xb);
-
-        xr += drx;
-        xg += dgx;
-        xb += dbx;
-    }
-
-    // Create Y table
-    dry /= h;
-    dgy /= h;
-    dby /= h;
-
-    for (y = 0; y < height; y++) {
-        *(yt++) = ((unsigned char) yr);
-        *(yt++) = ((unsigned char) yg);
-        *(yt++) = ((unsigned char) yb);
-
-        yr += dry;
-        yg += dgy;
-        yb += dby;
-    }
-
-    // Combine tables to create gradient
-
-
-    if (! interlaced) {
-
-
-        // normal dgradient
-        for (yt = ytable, y = 0; y < height; y++, yt += 3) {
-            for (xt = xtable, x = 0; x < width; x++) {
-                *(pr++) = *(xt++) + *(yt);
-                *(pg++) = *(xt++) + *(yt + 1);
-                *(pb++) = *(xt++) + *(yt + 2);
-            }
-        }
-
-    } else {
-        // faked interlacing effect
-        unsigned char channel, channel2;
-
-        for (yt = ytable, y = 0; y < height; y++, yt += 3) {
-            for (xt = xtable, x = 0; x < width; x++) {
-                if (y & 1) {
-                    channel = *(xt++) + *(yt);
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pr++) = channel2;
-
-                    channel = *(xt++) + *(yt + 1);
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pg++) = channel2;
-
-                    channel = *(xt++) + *(yt + 2);
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pb++) = channel2;
-                } else {
-                    channel = *(xt++) + *(yt);
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pr++) = channel2;
-
-                    channel = *(xt++) + *(yt + 1);
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pg++) = channel2;
-
-                    channel = *(xt++) + *(yt + 2);
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pb++) = channel2;
-                }
-            }
-        }
-    }
-
-
-}
-
-
-void TextureRender::hgradient() {
-    float drx, dgx, dbx,
-        xr = (float) from->red(),
-        xg = (float) from->green(),
-        xb = (float) from->blue();
-    unsigned char *pr = red, *pg = green, *pb = blue;
-
-    register unsigned int x, y;
-
-    drx = (float) (to->red() - from->red());
-    dgx = (float) (to->green() - from->green());
-    dbx = (float) (to->blue() - from->blue());
-
-    drx /= width;
-    dgx /= width;
-    dbx /= width;
-
-    if (interlaced && height > 2) {
-        // faked interlacing effect
-        unsigned char channel, channel2;
-
-        for (x = 0; x < width; x++, pr++, pg++, pb++) {
-            channel = (unsigned char) xr;
-            channel2 = (channel >> 1) + (channel >> 2);
-            if (channel2 > channel) channel2 = 0;
-            *pr = channel2;
-
-            channel = (unsigned char) xg;
-            channel2 = (channel >> 1) + (channel >> 2);
-            if (channel2 > channel) channel2 = 0;
-            *pg = channel2;
-
-            channel = (unsigned char) xb;
-            channel2 = (channel >> 1) + (channel >> 2);
-            if (channel2 > channel) channel2 = 0;
-            *pb = channel2;
-
-
-            channel = (unsigned char) xr;
-            channel2 = channel + (channel >> 3);
-            if (channel2 < channel) channel2 = ~0;
-            *(pr + width) = channel2;
-
-            channel = (unsigned char) xg;
-            channel2 = channel + (channel >> 3);
-            if (channel2 < channel) channel2 = ~0;
-            *(pg + width) = channel2;
-
-            channel = (unsigned char) xb;
-            channel2 = channel + (channel >> 3);
-            if (channel2 < channel) channel2 = ~0;
-            *(pb + width) = channel2;
-
-            xr += drx;
-            xg += dgx;
-            xb += dbx;
-        }
-
-        pr += width;
-        pg += width;
-        pb += width;
-
-        int offset;
-
-        for (y = 2; y < height; y++, pr += width, pg += width, pb += width) {
-            if (y & 1) offset = width; else offset = 0;
-
-            memcpy(pr, (red + offset), width);
-            memcpy(pg, (green + offset), width);
-            memcpy(pb, (blue + offset), width);
-        }
-    } else {
-
-        // normal hgradient
-        for (x = 0; x < width; x++) {
-            *(pr++) = (unsigned char) (xr);
-            *(pg++) = (unsigned char) (xg);
-            *(pb++) = (unsigned char) (xb);
-
-            xr += drx;
-            xg += dgx;
-            xb += dbx;
-        }
-
-        for (y = 1; y < height; y++, pr += width, pg += width, pb += width) {
-            memcpy(pr, red, width);
-            memcpy(pg, green, width);
-            memcpy(pb, blue, width);
-        }
-
-    }
-
-}
-
-
-void TextureRender::vgradient() {
-    float dry, dgy, dby,
-        yr = (float) from->red(),
-        yg = (float) from->green(),
-        yb = (float) from->blue();
-    unsigned char *pr = red, *pg = green, *pb = blue;
-
-    register unsigned int y;
-
-    dry = (float) (to->red() - from->red());
-    dgy = (float) (to->green() - from->green());
-    dby = (float) (to->blue() - from->blue());
-
-    dry /= height;
-    dgy /= height;
-    dby /= height;
-
-    if (interlaced) {
-        // faked interlacing effect
-        unsigned char channel, channel2;
-
-        for (y = 0; y < height; y++, pr += width, pg += width, pb += width) {
-            if (y & 1) {
-                channel = (unsigned char) yr;
-                channel2 = (channel >> 1) + (channel >> 2);
-                if (channel2 > channel) channel2 = 0;
-                memset(pr, channel2, width);
-
-                channel = (unsigned char) yg;
-                channel2 = (channel >> 1) + (channel >> 2);
-                if (channel2 > channel) channel2 = 0;
-                memset(pg, channel2, width);
-
-                channel = (unsigned char) yb;
-                channel2 = (channel >> 1) + (channel >> 2);
-                if (channel2 > channel) channel2 = 0;
-                memset(pb, channel2, width);
-            } else {
-                channel = (unsigned char) yr;
-                channel2 = channel + (channel >> 3);
-                if (channel2 < channel) channel2 = ~0;
-                memset(pr, channel2, width);
-
-                channel = (unsigned char) yg;
-                channel2 = channel + (channel >> 3);
-                if (channel2 < channel) channel2 = ~0;
-                memset(pg, channel2, width);
-
-                channel = (unsigned char) yb;
-                channel2 = channel + (channel >> 3);
-                if (channel2 < channel) channel2 = ~0;
-                memset(pb, channel2, width);
-            }
-
-            yr += dry;
-            yg += dgy;
-            yb += dby;
-        }
-    } else {
-
-        // normal vgradient
-        for (y = 0; y < height; y++, pr += width, pg += width, pb += width) {
-            memset(pr, (unsigned char) yr, width);
-            memset(pg, (unsigned char) yg, width);
-            memset(pb, (unsigned char) yb, width);
-
-            yr += dry;
-            yg += dgy;
-            yb += dby;
-        }
-    }
-
-
-}
-
-
-void TextureRender::pgradient() {
-    // pyramid gradient -	based on original dgradient, written by
-    // Mosfet (mosfet@kde.org)
-    // adapted from kde sources for Blackbox by Brad Hughes
-
-    float yr, yg, yb, drx, dgx, dbx, dry, dgy, dby,
-        xr, xg, xb;
-    int rsign, gsign, bsign;
-    unsigned char *pr = red, *pg = green, *pb = blue;
-    unsigned int tr = to->red(), tg = to->green(), tb = to->blue();
-    unsigned int *xt = xtable, *yt = ytable;
-
-    register unsigned int x, y;
-
-    dry = drx = (float) (to->red() - from->red());
-    dgy = dgx = (float) (to->green() - from->green());
-    dby = dbx = (float) (to->blue() - from->blue());
-
-    rsign = (drx < 0) ? -1 : 1;
-    gsign = (dgx < 0) ? -1 : 1;
-    bsign = (dbx < 0) ? -1 : 1;
-
-    xr = yr = (drx / 2);
-    xg = yg = (dgx / 2);
-    xb = yb = (dbx / 2);
-
-    // Create X table
-    drx /= width;
-    dgx /= width;
-    dbx /= width;
-
-    for (x = 0; x < width; x++) {
-        *(xt++) = (unsigned char) ((xr < 0) ? -xr : xr);
-        *(xt++) = (unsigned char) ((xg < 0) ? -xg : xg);
-        *(xt++) = (unsigned char) ((xb < 0) ? -xb : xb);
-
-        xr -= drx;
-        xg -= dgx;
-        xb -= dbx;
-    }
-
-    // Create Y table
-    dry /= height;
-    dgy /= height;
-    dby /= height;
-
-    for (y = 0; y < height; y++) {
-        *(yt++) = ((unsigned char) ((yr < 0) ? -yr : yr));
-        *(yt++) = ((unsigned char) ((yg < 0) ? -yg : yg));
-        *(yt++) = ((unsigned char) ((yb < 0) ? -yb : yb));
-
-        yr -= dry;
-        yg -= dgy;
-        yb -= dby;
-    }
-
-    // Combine tables to create gradient
-
-
-    if (! interlaced) {
-
-        // normal pgradient
-        for (yt = ytable, y = 0; y < height; y++, yt += 3) {
-            for (xt = xtable, x = 0; x < width; x++) {
-                *(pr++) = (unsigned char) (tr - (rsign * (*(xt++) + *(yt))));
-                *(pg++) = (unsigned char) (tg - (gsign * (*(xt++) + *(yt + 1))));
-                *(pb++) = (unsigned char) (tb - (bsign * (*(xt++) + *(yt + 2))));
-            }
-        }
-
-    } else {
-        // faked interlacing effect
-        unsigned char channel, channel2;
-
-        for (yt = ytable, y = 0; y < height; y++, yt += 3) {
-            for (xt = xtable, x = 0; x < width; x++) {
-                if (y & 1) {
-                    channel = (unsigned char) (tr - (rsign * (*(xt++) + *(yt))));
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pr++) = channel2;
-
-                    channel = (unsigned char) (tg - (gsign * (*(xt++) + *(yt + 1))));
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pg++) = channel2;
-
-                    channel = (unsigned char) (tb - (bsign * (*(xt++) + *(yt + 2))));
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pb++) = channel2;
-                } else {
-                    channel = (unsigned char) (tr - (rsign * (*(xt++) + *(yt))));
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pr++) = channel2;
-
-                    channel = (unsigned char) (tg - (gsign * (*(xt++) + *(yt + 1))));
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pg++) = channel2;
-
-                    channel = (unsigned char) (tb - (bsign * (*(xt++) + *(yt + 2))));
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pb++) = channel2;
-                }
-            }
-        }
-    }
-
-}
-
-
-void TextureRender::rgradient() {
-    // rectangle gradient -	based on original dgradient, written by
-    // Mosfet (mosfet@kde.org)
-    // adapted from kde sources for Blackbox by Brad Hughes
-
-    float drx, dgx, dbx, dry, dgy, dby, xr, xg, xb, yr, yg, yb;
-    int rsign, gsign, bsign;
-    unsigned char *pr = red, *pg = green, *pb = blue;
-    unsigned int tr = to->red(), tg = to->green(), tb = to->blue();
-    unsigned int *xt = xtable, *yt = ytable;
-
-    register unsigned int x, y;
-
-    dry = drx = (float) (to->red() - from->red());
-    dgy = dgx = (float) (to->green() - from->green());
-    dby = dbx = (float) (to->blue() - from->blue());
-
-    rsign = (drx < 0) ? -2 : 2;
-    gsign = (dgx < 0) ? -2 : 2;
-    bsign = (dbx < 0) ? -2 : 2;
-
-    xr = yr = (drx / 2);
-    xg = yg = (dgx / 2);
-    xb = yb = (dbx / 2);
-
-    // Create X table
-    drx /= width;
-    dgx /= width;
-    dbx /= width;
-
-    for (x = 0; x < width; x++) {
-        *(xt++) = (unsigned char) ((xr < 0) ? -xr : xr);
-        *(xt++) = (unsigned char) ((xg < 0) ? -xg : xg);
-        *(xt++) = (unsigned char) ((xb < 0) ? -xb : xb);
-
-        xr -= drx;
-        xg -= dgx;
-        xb -= dbx;
-    }
-
-    // Create Y table
-    dry /= height;
-    dgy /= height;
-    dby /= height;
-
-    for (y = 0; y < height; y++) {
-        *(yt++) = ((unsigned char) ((yr < 0) ? -yr : yr));
-        *(yt++) = ((unsigned char) ((yg < 0) ? -yg : yg));
-        *(yt++) = ((unsigned char) ((yb < 0) ? -yb : yb));
-
-        yr -= dry;
-        yg -= dgy;
-        yb -= dby;
-    }
-
-    // Combine tables to create gradient
-
-
-    if (! interlaced) {
-
-        // normal rgradient
-        for (yt = ytable, y = 0; y < height; y++, yt += 3) {
-            for (xt = xtable, x = 0; x < width; x++) {
-                *(pr++) = (unsigned char) (tr - (rsign * max(*(xt++), *(yt))));
-                *(pg++) = (unsigned char) (tg - (gsign * max(*(xt++), *(yt + 1))));
-                *(pb++) = (unsigned char) (tb - (bsign * max(*(xt++), *(yt + 2))));
-            }
-        }
-
-    } else {
-        // faked interlacing effect
-        unsigned char channel, channel2;
-
-        for (yt = ytable, y = 0; y < height; y++, yt += 3) {
-            for (xt = xtable, x = 0; x < width; x++) {
-                if (y & 1) {
-                    channel = (unsigned char) (tr - (rsign * max(*(xt++), *(yt))));
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pr++) = channel2;
-
-                    channel = (unsigned char) (tg - (gsign * max(*(xt++), *(yt + 1))));
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pg++) = channel2;
-
-                    channel = (unsigned char) (tb - (bsign * max(*(xt++), *(yt + 2))));
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pb++) = channel2;
-                } else {
-                    channel = (unsigned char) (tr - (rsign * max(*(xt++), *(yt))));
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pr++) = channel2;
-
-                    channel = (unsigned char) (tg - (gsign * max(*(xt++), *(yt + 1))));
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pg++) = channel2;
-
-                    channel = (unsigned char) (tb - (bsign * max(*(xt++), *(yt + 2))));
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pb++) = channel2;
-                }
-            }
-        }
-    }
-
-}
-
-
-void TextureRender::egradient() {
-    // elliptic gradient -	based on original dgradient, written by
-    // Mosfet (mosfet@kde.org)
-    // adapted from kde sources for Blackbox by Brad Hughes
-
-    float drx, dgx, dbx, dry, dgy, dby, yr, yg, yb, xr, xg, xb;
-    int rsign, gsign, bsign;
-    unsigned char *pr = red, *pg = green, *pb = blue;
-    unsigned int *xt = xtable, *yt = ytable;
-    unsigned int tr = (unsigned long) to->red(),
-        tg = (unsigned long) to->green(),
-        tb = (unsigned long) to->blue();
-
-    register unsigned int x, y;
-
-    dry = drx = (float) (to->red() - from->red());
-    dgy = dgx = (float) (to->green() - from->green());
-    dby = dbx = (float) (to->blue() - from->blue());
-
-    rsign = (drx < 0) ? -1 : 1;
-    gsign = (dgx < 0) ? -1 : 1;
-    bsign = (dbx < 0) ? -1 : 1;
-
-    xr = yr = (drx / 2);
-    xg = yg = (dgx / 2);
-    xb = yb = (dbx / 2);
-
-    // Create X table
-    drx /= width;
-    dgx /= width;
-    dbx /= width;
-
-    for (x = 0; x < width; x++) {
-        *(xt++) = (unsigned long) (xr * xr);
-        *(xt++) = (unsigned long) (xg * xg);
-        *(xt++) = (unsigned long) (xb * xb);
-
-        xr -= drx;
-        xg -= dgx;
-        xb -= dbx;
-    }
-
-    // Create Y table
-    dry /= height;
-    dgy /= height;
-    dby /= height;
-
-    for (y = 0; y < height; y++) {
-        *(yt++) = (unsigned long) (yr * yr);
-        *(yt++) = (unsigned long) (yg * yg);
-        *(yt++) = (unsigned long) (yb * yb);
-
-        yr -= dry;
-        yg -= dgy;
-        yb -= dby;
-    }
-
-    // Combine tables to create gradient
-    if (! interlaced) {
-        // normal egradient
-        for (yt = ytable, y = 0; y < height; y++, yt += 3) {
-            for (xt = xtable, x = 0; x < width; x++) {
-                *(pr++) = (unsigned char)
-                    (tr - (rsign * control.getSqrt(*(xt++) + *(yt))));
-                *(pg++) = (unsigned char)
-                    (tg - (gsign * control.getSqrt(*(xt++) + *(yt + 1))));
-                *(pb++) = (unsigned char)
-                    (tb - (bsign * control.getSqrt(*(xt++) + *(yt + 2))));
-            }
-        }
-
-    } else {
-        // faked interlacing effect
-        unsigned char channel, channel2;
-
-        for (yt = ytable, y = 0; y < height; y++, yt += 3) {
-            for (xt = xtable, x = 0; x < width; x++) {
-                if (y & 1) {
-                    channel = (unsigned char)
-                        (tr - (rsign * control.getSqrt(*(xt++) + *(yt))));
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pr++) = channel2;
-
-                    channel = (unsigned char)
-                        (tg - (gsign * control.getSqrt(*(xt++) + *(yt + 1))));
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pg++) = channel2;
-
-                    channel = (unsigned char)
-                        (tb - (bsign * control.getSqrt(*(xt++) + *(yt + 2))));
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pb++) = channel2;
-                } else {
-                    channel = (unsigned char)
-                        (tr - (rsign * control.getSqrt(*(xt++) + *(yt))));
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pr++) = channel2;
-
-                    channel = (unsigned char)
-                        (tg - (gsign * control.getSqrt(*(xt++) + *(yt + 1))));
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pg++) = channel2;
-
-                    channel = (unsigned char)
-                        (tb - (bsign * control.getSqrt(*(xt++) + *(yt + 2))));
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pb++) = channel2;
-                }
-            }
-        }
-    }
-
-}
-
-
-void TextureRender::pcgradient() {
-    // pipe cross gradient -	based on original dgradient, written by
-    // Mosfet (mosfet@kde.org)
-    // adapted from kde sources for Blackbox by Brad Hughes
-
-    float drx, dgx, dbx, dry, dgy, dby, xr, xg, xb, yr, yg, yb;
-    int rsign, gsign, bsign;
-    unsigned char *pr = red, *pg = green, *pb = blue;
-    unsigned int *xt = xtable, *yt = ytable;
-    unsigned int tr = to->red(),
-        tg = to->green(),
-        tb = to->blue();
-
-    register unsigned int x, y;
-
-    dry = drx = (float) (to->red() - from->red());
-    dgy = dgx = (float) (to->green() - from->green());
-    dby = dbx = (float) (to->blue() - from->blue());
-
-    rsign = (drx < 0) ? -2 : 2;
-    gsign = (dgx < 0) ? -2 : 2;
-    bsign = (dbx < 0) ? -2 : 2;
-
-    xr = yr = (drx / 2);
-    xg = yg = (dgx / 2);
-    xb = yb = (dbx / 2);
-
-    // Create X table
-    drx /= width;
-    dgx /= width;
-    dbx /= width;
-
-    for (x = 0; x < width; x++) {
-        *(xt++) = (unsigned char) ((xr < 0) ? -xr : xr);
-        *(xt++) = (unsigned char) ((xg < 0) ? -xg : xg);
-        *(xt++) = (unsigned char) ((xb < 0) ? -xb : xb);
-
-        xr -= drx;
-        xg -= dgx;
-        xb -= dbx;
-    }
-
-    // Create Y table
-    dry /= height;
-    dgy /= height;
-    dby /= height;
-
-    for (y = 0; y < height; y++) {
-        *(yt++) = ((unsigned char) ((yr < 0) ? -yr : yr));
-        *(yt++) = ((unsigned char) ((yg < 0) ? -yg : yg));
-        *(yt++) = ((unsigned char) ((yb < 0) ? -yb : yb));
-
-        yr -= dry;
-        yg -= dgy;
-        yb -= dby;
-    }
-
-    // Combine tables to create gradient
-    if (! interlaced) {
-
-        // normal pcgradient
-        for (yt = ytable, y = 0; y < height; y++, yt += 3) {
-            for (xt = xtable, x = 0; x < width; x++) {
-                *(pr++) = (unsigned char) (tr - (rsign * min(*(xt++), *(yt))));
-                *(pg++) = (unsigned char) (tg - (gsign * min(*(xt++), *(yt + 1))));
-                *(pb++) = (unsigned char) (tb - (bsign * min(*(xt++), *(yt + 2))));
-            }
-        }
-
-    } else {
-        // faked interlacing effect
-        unsigned char channel, channel2;
-
-        for (yt = ytable, y = 0; y < height; y++, yt += 3) {
-            for (xt = xtable, x = 0; x < width; x++) {
-                if (y & 1) {
-                    channel = (unsigned char) (tr - (rsign * min(*(xt++), *(yt))));
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pr++) = channel2;
-
-                    channel = (unsigned char) (tg - (bsign * min(*(xt++), *(yt + 1))));
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pg++) = channel2;
-
-                    channel = (unsigned char) (tb - (gsign * min(*(xt++), *(yt + 2))));
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pb++) = channel2;
-                } else {
-                    channel = (unsigned char) (tr - (rsign * min(*(xt++), *(yt))));
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pr++) = channel2;
-
-                    channel = (unsigned char) (tg - (gsign * min(*(xt++), *(yt + 1))));
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pg++) = channel2;
-
-                    channel = (unsigned char) (tb - (bsign * min(*(xt++), *(yt + 2))));
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pb++) = channel2;
-                }
-            }
-        }
-    }
-
-}
-
-
-void TextureRender::cdgradient() {
-    // cross diagonal gradient -	based on original dgradient, written by
-    // Mosfet (mosfet@kde.org)
-    // adapted from kde sources for Blackbox by Brad Hughes
-
-    float drx, dgx, dbx, dry, dgy, dby, yr = 0.0, yg = 0.0, yb = 0.0,
-        xr = (float) from->red(),
-        xg = (float) from->green(),
-        xb = (float) from->blue();
-    unsigned char *pr = red, *pg = green, *pb = blue;
-    unsigned int w = width * 2, h = height * 2, *xt, *yt;
-
-    register unsigned int x, y;
-
-    dry = drx = (float) (to->red() - from->red());
-    dgy = dgx = (float) (to->green() - from->green());
-    dby = dbx = (float) (to->blue() - from->blue());
-
-    // Create X table
-    drx /= w;
-    dgx /= w;
-    dbx /= w;
-
-    for (xt = (xtable + (width * 3) - 1), x = 0; x < width; x++) {
-        *(xt--) = (unsigned char) xb;
-        *(xt--) = (unsigned char) xg;
-        *(xt--) = (unsigned char) xr;
-
-        xr += drx;
-        xg += dgx;
-        xb += dbx;
-    }
-
-    // Create Y table
-    dry /= h;
-    dgy /= h;
-    dby /= h;
-
-    for (yt = ytable, y = 0; y < height; y++) {
-        *(yt++) = (unsigned char) yr;
-        *(yt++) = (unsigned char) yg;
-        *(yt++) = (unsigned char) yb;
-
-        yr += dry;
-        yg += dgy;
-        yb += dby;
-    }
-
-    // Combine tables to create gradient
-
-    if (! interlaced) {
-        // normal cdgradient
-        for (yt = ytable, y = 0; y < height; y++, yt += 3) {
-            for (xt = xtable, x = 0; x < width; x++) {
-                *(pr++) = *(xt++) + *(yt);
-                *(pg++) = *(xt++) + *(yt + 1);
-                *(pb++) = *(xt++) + *(yt + 2);
-            }
-        }
-
-    } else {
-        // faked interlacing effect
-        unsigned char channel, channel2;
-
-        for (yt = ytable, y = 0; y < height; y++, yt += 3) {
-            for (xt = xtable, x = 0; x < width; x++) {
-                if (y & 1) {
-                    channel = *(xt++) + *(yt);
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pr++) = channel2;
-
-                    channel = *(xt++) + *(yt + 1);
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pg++) = channel2;
-
-                    channel = *(xt++) + *(yt + 2);
-                    channel2 = (channel >> 1) + (channel >> 2);
-                    if (channel2 > channel) channel2 = 0;
-                    *(pb++) = channel2;
-                } else {
-                    channel = *(xt++) + *(yt);
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pr++) = channel2;
-
-                    channel = *(xt++) + *(yt + 1);
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pg++) = channel2;
-
-                    channel = *(xt++) + *(yt + 2);
-                    channel2 = channel + (channel >> 3);
-                    if (channel2 < channel) channel2 = ~0;
-                    *(pb++) = channel2;
-                }
-            }
-        }
-    }
-
-}
-
 } // end namespace FbTk
+

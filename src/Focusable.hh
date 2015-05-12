@@ -24,9 +24,8 @@
 
 #include "FbTk/PixmapWithMask.hh"
 #include "FbTk/ITypeAheadable.hh"
-#include "FbTk/Subject.hh"
-
-#include <string>
+#include "FbTk/Signal.hh"
+#include "FbTk/FbString.hh"
 
 class BScreen;
 class FluxboxWindow;
@@ -41,8 +40,10 @@ public:
         m_screen(scr), m_fbwin(fbwin),
         m_instance_name("fluxbox"), m_class_name("fluxbox"),
         m_focused(false), m_attention_state(false),
-        m_titlesig(*this), m_focussig(*this), m_diesig(*this),
-        m_attentionsig(*this) { }
+        m_attentionsig(),
+        m_focussig(),
+        m_diesig(),
+        m_titlesig() { }
     virtual ~Focusable() { }
 
     /**
@@ -53,14 +54,16 @@ public:
 
     /// @return true if the focusable has input focus
     virtual bool isFocused() const { return m_focused; }
-    /// @return return true if it can be focused
+    /// @return true if it can be focused
     virtual bool acceptsFocus() const { return true; }
+    /// @return true if temporarily prevented from being focused
+    virtual bool isModal() const { return false; }
 
     /// @return true if icon button should appear focused
     bool getAttentionState() const { return m_attention_state; }
     /// @set the attention state
     virtual void setAttentionState(bool value) {
-        m_attention_state = value; attentionSig().notify();
+        m_attention_state = value; attentionSig().emit(*this);
     }
 
     /// @return the screen in which this object resides
@@ -80,11 +83,14 @@ public:
     FluxboxWindow *fbwindow() { return m_fbwin; }
 
     /// @return WM_CLASS class string (for pattern matching)
-    virtual const std::string &getWMClassClass() const { return m_class_name; }
+    virtual const FbTk::FbString &getWMClassClass() const { return m_class_name; }
     /// @return WM_CLASS name string (for pattern matching)
-    virtual const std::string &getWMClassName() const { return m_instance_name; }
+    virtual const FbTk::FbString &getWMClassName() const { return m_instance_name; }
     /// @return wm role string (for pattern matching)
     virtual std::string getWMRole() const { return "Focusable"; }
+
+    virtual FbTk::FbString getTextProperty(Atom prop,bool*exists=NULL) const { return ""; }
+    virtual long getCardinalProperty(Atom prop,bool*exists=NULL) const { return 0; }
 
     /// @return whether this window is a transient (for pattern matching)
     virtual bool isTransient() const { return false; }
@@ -93,50 +99,47 @@ public:
     /// @return icon pixmap of the focusable
     virtual const FbTk::PixmapWithMask &icon() const { return m_icon; }
     /// @return title string
-    virtual const std::string &title() const { return m_title; }
+    virtual const FbTk::BiDiString &title() const { return m_title; }
     /// @return type ahead string
-    const std::string &iTypeString() const { return title(); }
-    /**
-     * Signaling object to attatch observers to.
-     */
-    class FocusSubject: public FbTk::Subject {
-    public:
-        explicit FocusSubject(Focusable &w):m_win(w) { }
-        /// @return context focusable for this signal
-        Focusable &win() { return m_win; }
-        /// @return context focusable for this signal
-        const Focusable &win() const { return m_win; }
-    private:
-        Focusable &m_win; //< the context
-    };
+    const std::string &iTypeString() const { return title().logical(); }
 
     /**
        @name signals
        @{
     */
-    // Used for both title and icon changes.
-    FbTk::Subject &titleSig() { return m_titlesig; }
-    // Used for both title and icon changes.
-    const FbTk::Subject &titleSig() const { return m_titlesig; }
-    FbTk::Subject &focusSig() { return m_focussig; }
-    const FbTk::Subject &focusSig() const { return m_focussig; }
-    FbTk::Subject &dieSig() { return m_diesig; }
-    const FbTk::Subject &dieSig() const { return m_diesig; }
-    FbTk::Subject &attentionSig() { return m_attentionsig; }
-    const FbTk::Subject &attentionSig() const { return m_attentionsig; }
+    typedef FbTk::Signal<const std::string&, Focusable&> TitleSignal;
+    /// Used for both title and icon changes.
+    TitleSignal &titleSig() { return m_titlesig; }
+    /// Used for both title and icon changes.
+    const TitleSignal &titleSig() const { return m_titlesig; }
+    FbTk::Signal<Focusable&> &focusSig() { return m_focussig; }
+    FbTk::Signal<Focusable&> &dieSig() { return m_diesig; }
+    FbTk::Signal<Focusable&> &attentionSig() { return m_attentionsig; }
     /** @} */ // end group signals
+
+    /// Notify any listeners that the focus changed for this window.
+    void notifyFocusChanged() {
+        m_focussig.emit(*this);
+    }
 
 protected:
     BScreen &m_screen; //< the screen in which it works
     FluxboxWindow *m_fbwin; //< the working fluxbox window
 
-    std::string m_title, m_instance_name, m_class_name;
+    FbTk::BiDiString m_title;
+    FbTk::FbString m_instance_name;
+    FbTk::FbString m_class_name;
+
     bool m_focused; //< whether or not it has focus
     bool m_attention_state; //< state of icon button while demanding attention
     FbTk::PixmapWithMask m_icon; //< icon pixmap with mask
 
-    // state and hint signals
-    FocusSubject m_titlesig, m_focussig, m_diesig, m_attentionsig;
+
+private:
+    FbTk::Signal<Focusable&> m_attentionsig;
+    FbTk::Signal<Focusable&> m_focussig;
+    FbTk::Signal<Focusable&> m_diesig;
+    TitleSignal m_titlesig;
 };
 
 #endif // FOCUSABLE_HH

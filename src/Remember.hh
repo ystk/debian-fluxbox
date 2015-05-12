@@ -41,7 +41,7 @@ class Application;
 
 namespace FbTk {
 class AutoReloadHelper;
-};
+}
 
 /**
  * Class Remember is an atomhandler to avoid interfering with
@@ -73,6 +73,7 @@ public:
         REM_MINIMIZEDSTATE,
         REM_MAXIMIZEDSTATE,
         REM_FULLSCREENSTATE,
+        REM_FOCUSNEWWINDOW,
         REM_LASTATTRIB // not actually used
     };
 

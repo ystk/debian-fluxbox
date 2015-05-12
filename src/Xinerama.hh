@@ -63,7 +63,7 @@ template <typename ItemType>
 class XineramaHeadMenu : public ToggleMenu {
 public:
     XineramaHeadMenu(FbTk::ThemeProxy<FbTk::MenuTheme> &tm, BScreen &screen,
-                     FbTk::ImageControl &imgctrl, FbTk::XLayer &layer,
+                     FbTk::ImageControl &imgctrl, FbTk::Layer &layer,
                      ItemType &item, const FbTk::FbString & title = "");
     void reloadHeads();
 
@@ -76,7 +76,7 @@ private:
 template <typename ItemType>
 XineramaHeadMenu<ItemType>::XineramaHeadMenu(
         FbTk::ThemeProxy<FbTk::MenuTheme> &tm, BScreen &screen,
-        FbTk::ImageControl &imgctrl, FbTk::XLayer &layer, ItemType &item,
+        FbTk::ImageControl &imgctrl, FbTk::Layer &layer, ItemType &item,
         const FbTk::FbString & title):
     ToggleMenu(tm, imgctrl, layer),
     m_object(item), m_screen(screen)
@@ -92,7 +92,6 @@ void XineramaHeadMenu<ItemType>::reloadHeads()
     FbTk::RefCount<FbTk::Command<void> > saverc_cmd(new FbTk::SimpleCommand<Fluxbox>(
                                      *Fluxbox::instance(), 
                                      &Fluxbox::save_rc));
-    char tname[128];
     for (int i=1; i <= m_screen.numHeads(); ++i) {
         // TODO: nls
 /*
@@ -102,9 +101,10 @@ void XineramaHeadMenu<ItemType>::reloadHeads()
                     FBNLS::XineramaDefaultHeadFormat,
                     "Head %d"), i); //m_id starts at 0
 */
-        sprintf(tname, "Head %d", i);
+        std::string tname("Head ");
+        tname += FbTk::StringUtil::number2String(i);
         insert(new XineramaHeadMenuItem<ItemType>(
-                   tname, m_object, i, saverc_cmd));
+                   tname.c_str(), m_object, i, saverc_cmd));
     }
     // TODO: nls
     insert(new XineramaHeadMenuItem<ItemType>(

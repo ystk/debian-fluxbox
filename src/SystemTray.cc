@@ -24,13 +24,14 @@
 #include "FbTk/EventManager.hh"
 #include "FbTk/ImageControl.hh"
 #include "FbTk/TextUtils.hh"
+#include "FbTk/MemFun.hh"
 
 #include "AtomHandler.hh"
 #include "fluxbox.hh"
 #include "WinClient.hh"
 #include "Screen.hh"
 #include "ButtonTheme.hh"
-#include "SimpleObserver.hh"
+#include "Debug.hh"
 
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
@@ -39,13 +40,10 @@
 
 using std::string;
 
-#ifdef DEBUG
-#include <iostream>
-using std::cerr;
+
 using std::endl;
 using std::hex;
 using std::dec;
-#endif // DEBUG
 
 /// helper class for tray windows, so we dont call XDestroyWindow
 class TrayWindow: public FbTk::FbWindow {
@@ -85,9 +83,9 @@ public:
             mapped = (bool)(static_cast<unsigned long>(prop[1]) & XEMBED_MAPPED);
             XFree(static_cast<void *>(prop));
 
-#ifdef DEBUG
-            cerr<<__FILE__<<"(SystemTray::TrayWindow::getMappedDefault(): XEMBED_MAPPED = "<<mapped<<endl;
-#endif // DEBUG
+
+            fbdbg<<"(SystemTray::TrayWindow::getMappedDefault(): XEMBED_MAPPED = "<<mapped<<endl;
+
 
         }
         return true;
@@ -168,39 +166,35 @@ SystemTray::SystemTray(const FbTk::FbWindow& parent,
     FbTk::EventManager::instance()->add(*this, m_window);
     FbTk::EventManager::instance()->add(*this, m_selection_owner);
     // setup signals
-    m_observer.reset(makeObserver(*this, &SystemTray::update));
-    m_theme->reconfigSig().attach(m_observer.get());
-    screen.bgChangeSig().attach(m_observer.get());
+    join(m_theme->reconfigSig(), FbTk::MemFun(*this, &SystemTray::update));
+
+    join(screen.bgChangeSig(),
+         FbTk::MemFunIgnoreArgs(*this, &SystemTray::update));
+
 
     Fluxbox* fluxbox = Fluxbox::instance();
     Display *disp = fluxbox->display();
 
-    // setup atom name to _NET_SYSTEM_TRAY_S<screen number>
-    char intbuff[16];
-    sprintf(intbuff, "%d", m_window.screenNumber());
-    string atom_name("_NET_SYSTEM_TRAY_S");
-    atom_name += intbuff; // append number
-
     // get selection owner and see if it's free
+    string atom_name = getNetSystemTrayAtom(m_window.screenNumber());
     Atom tray_atom = XInternAtom(disp, atom_name.c_str(), False);
     Window owner = XGetSelectionOwner(disp, tray_atom);
     if (owner != 0) {
-#ifdef DEBUG
-        cerr<<__FILE__<<"(SystemTray(const FbTk::FbWindow)): can't set owner!"<<endl;
-#endif // DEBUG
+        fbdbg<<"(SystemTray(const FbTk::FbWindow)): can't set owner!"<<endl;
         return;  // the're can't be more than one owner
     }
 
     // ok, it was free. Lets set owner
-#ifdef DEBUG
-    cerr<<__FILE__<<"(SystemTray(const FbTk::FbWindow)): SETTING OWNER!"<<endl;
-#endif // DEBUG
+
+    fbdbg<<"(SystemTray(const FbTk::FbWindow)): SETTING OWNER!"<<endl;
+
     // set owner
     XSetSelectionOwner(disp, tray_atom, m_selection_owner.window(), CurrentTime);
 
     m_handler.reset(new SystemTrayHandler(*this));
 
-    fluxbox->addAtomHandler(m_handler.get(), atom_name);
+    m_handler.get()->setName(atom_name);
+    fluxbox->addAtomHandler(m_handler.get());
 
 
     // send selection owner msg
@@ -227,13 +221,9 @@ SystemTray::~SystemTray() {
     Fluxbox* fluxbox = Fluxbox::instance();
     fluxbox->removeAtomHandler(m_handler.get());
     Display *disp = fluxbox->display();
-    // setup atom name to _NET_SYSTEM_TRAY_S<screen number>
-    char intbuff[16];
-    sprintf(intbuff, "%d", m_window.screenNumber());
-    string atom_name("_NET_SYSTEM_TRAY_S");
-    atom_name += intbuff; // append number
 
     // get selection owner and see if it's free
+    string atom_name = getNetSystemTrayAtom(m_window.screenNumber());
     Atom tray_atom = XInternAtom(disp, atom_name.c_str(), False);
 
     // Properly give up selection.
@@ -256,7 +246,7 @@ void SystemTray::resize(unsigned int width, unsigned int height) {
         m_window.resize(width, height);
         if (m_num_visible_clients)
             rearrangeClients();
-        resizeSig().notify();
+        resizeSig().emit();
     }
 }
 
@@ -267,7 +257,7 @@ void SystemTray::moveResize(int x, int y,
         m_window.moveResize(x, y, width, height);
         if (m_num_visible_clients)
             rearrangeClients();
-        resizeSig().notify();
+        resizeSig().emit();
     } else {
         move(x, y);
     }
@@ -287,14 +277,14 @@ unsigned int SystemTray::width() const {
     if (orientation() == FbTk::ROT90 || orientation() == FbTk::ROT270)
         return m_window.width();
 
-    return m_num_visible_clients * (height() - 2 * m_theme->border().width());
+    return m_num_visible_clients * (height() + 2 * m_theme->border().width());
 }
 
 unsigned int SystemTray::height() const {
     if (orientation() == FbTk::ROT0 || orientation() == FbTk::ROT180)
         return m_window.height();
 
-    return m_num_visible_clients * (width() - 2 * m_theme->border().width());
+    return m_num_visible_clients * (width() + 2 * m_theme->border().width());
 }
 
 unsigned int SystemTray::borderWidth() const {
@@ -311,17 +301,17 @@ bool SystemTray::clientMessage(const XClientMessageEvent &event) {
 
         int type = event.data.l[1];
         if (type == SYSTEM_TRAY_REQUEST_DOCK) {
-#ifdef DEBUG
-            cerr<<"SystemTray::clientMessage(const XClientMessageEvent): SYSTEM_TRAY_REQUEST_DOCK"<<endl;
-            cerr<<"window = event.data.l[2] = "<<event.data.l[2]<<endl;
-#endif // DEBUG
+
+            fbdbg<<"SystemTray::clientMessage(const XClientMessageEvent): SYSTEM_TRAY_REQUEST_DOCK"<<endl;
+            fbdbg<<"window = event.data.l[2] = "<<event.data.l[2]<<endl;
+
             addClient(event.data.l[2], true);
         }
         /*
         else if (type == SYSTEM_TRAY_BEGIN_MESSAGE)
-            cerr<<"BEGIN MESSAGE"<<endl;
+            fbdbg<<"BEGIN MESSAGE"<<endl;
         else if (type == SYSTEM_TRAY_CANCEL_MESSAGE)
-            cerr<<"CANCEL MESSAGE"<<endl;
+            fbdbg<<"CANCEL MESSAGE"<<endl;
         */
 
         return true;
@@ -362,9 +352,7 @@ void SystemTray::addClient(Window win, bool using_xembed) {
 
     TrayWindow *traywin = new TrayWindow(win, using_xembed);
 
-#ifdef DEBUG
-    cerr<<"SystemTray::addClient(Window): 0x"<<hex<<win<<dec<<endl;
-#endif // DEBUG
+    fbdbg<<"SystemTray::addClient(Window): 0x"<<hex<<win<<dec<<endl;
 
     m_clients.push_back(traywin);
     FbTk::EventManager::instance()->add(*this, win);
@@ -400,9 +388,8 @@ void SystemTray::removeClient(Window win, bool destroyed) {
     if (tray_it == m_clients.end())
         return;
 
-#ifdef DEBUG
-    cerr<<__FILE__<<"(SystemTray::removeClient(Window)): 0x"<<hex<<win<<dec<<endl;
-#endif // DEBUG
+    fbdbg<<"(SystemTray::removeClient(Window)): 0x"<<hex<<win<<dec<<endl;
+
     TrayWindow *traywin = *tray_it;
     m_clients.erase(tray_it);
     if (!destroyed) {
@@ -448,7 +435,7 @@ void SystemTray::handleEvent(XEvent &event) {
                 (*it)->sendConfigureNotify(0, 0, (*it)->width(), (*it)->height());
                 // so toolbar know that we changed size
                 // done inside this loop, because otherwise we can get into nasty looping
-                resizeSig().notify();
+                resizeSig().emit();
             }
         }
 
@@ -560,6 +547,14 @@ void SystemTray::update() {
 }
 
 Atom SystemTray::getXEmbedInfoAtom() {
-static Atom theatom =  XInternAtom(Fluxbox::instance()->display(), "_XEMBED_INFO", False);
-return theatom;
+    static Atom theatom = XInternAtom(Fluxbox::instance()->display(), "_XEMBED_INFO", False);
+    return theatom;
+}
+
+string SystemTray::getNetSystemTrayAtom(int screen_nr) {
+
+    string atom_name("_NET_SYSTEM_TRAY_S");
+    atom_name += FbTk::StringUtil::number2String(screen_nr);
+
+    return atom_name;
 }

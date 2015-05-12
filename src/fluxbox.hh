@@ -28,8 +28,9 @@
 #include "FbTk/App.hh"
 #include "FbTk/Resource.hh"
 #include "FbTk/Timer.hh"
-#include "FbTk/Observer.hh"
 #include "FbTk/SignalHandler.hh"
+#include "FbTk/Signal.hh"
+
 #include "AttentionNoticeHandler.hh"
 
 #include <X11/Xresource.h>
@@ -74,13 +75,15 @@ class FbAtoms;
 */
 class Fluxbox : public FbTk::App,
                 public FbTk::SignalEventHandler,
-                public FbTk::Observer {
+                private FbTk::SignalTracker {
 public:
-    Fluxbox(int argc, char **argv, const char * dpy_name= 0,
-            const char *rcfilename = 0, bool xsync = false);
+    Fluxbox(int argc, char **argv,
+            const std::string& dpy_name,
+            const std::string& rc_path, const std::string& rc_filename,
+            bool xsync = false);
     virtual ~Fluxbox();
 
-    static Fluxbox *instance() { return s_singleton; }
+    static Fluxbox *instance();
 
     /// main event loop
     void eventLoop();
@@ -103,7 +106,7 @@ public:
     Time getLastTime() const { return m_last_time; }
 
     AtomHandler *getAtomHandler(const std::string &name);
-    void addAtomHandler(AtomHandler *atomh, const std::string &name);
+    void addAtomHandler(AtomHandler *atomh);
     void removeAtomHandler(AtomHandler *atomh);
 
     /// obsolete
@@ -151,7 +154,6 @@ public:
 
     /// handle any system signal sent to the application
     void handleSignal(int signum);
-    void update(FbTk::Subject *changed);
     /// todo, remove this. just temporary
     void updateFrameExtents(FluxboxWindow &win);
 
@@ -175,8 +177,8 @@ public:
     typedef std::list<BScreen *> ScreenList;
     const ScreenList screenList() const { return m_screen_list; }
 
-    bool haveShape() const { return m_have_shape; }
-    int shapeEventbase() const { return m_shape_eventbase; }
+    bool haveShape() const;
+    int shapeEventbase() const;
     std::string getDefaultDataFilename(const char *name) const;
     // screen mouse was in at last key event
     BScreen *mouseScreen() { return m_mousescreen; }
@@ -194,13 +196,40 @@ private:
 
     void handleEvent(XEvent *xe);
 
-    void setupConfigFiles();
     void handleUnmapNotify(XUnmapEvent &ue);
     void handleClientMessage(XClientMessageEvent &ce);
+
+    /// Called when workspace count on a specific screen changed.
+    void workspaceCountChanged( BScreen& screen );
+    /// Called when workspace was switched
+    void workspaceChanged(BScreen& screen);
+    /// Called when workspace names changed
+    void workspaceNamesChanged(BScreen &screen);
+    /// Called when the client list changed.
+    void clientListChanged(BScreen &screen);
+    /// Called when the focused window changed on a screen
+    void focusedWindowChanged(BScreen &screen,
+                              FluxboxWindow* win,
+                              WinClient* client);
+
+    /// Called when the workspace area changed.
+    void workspaceAreaChanged(BScreen &screen);
+    /// Called when a window (FluxboxWindow) dies
+    void windowDied(Focusable &focusable);
+    /// Called when a client (WinClient) dies
+    void clientDied(Focusable &focusable);
+    /// Called when a window changes workspace
+    void windowWorkspaceChanged(FluxboxWindow &win);
+    /// Called when a window changes state
+    void windowStateChanged(FluxboxWindow &win);
+    /// Called when a window layer changes
+    void windowLayerChanged(FluxboxWindow &win);
 
     std::auto_ptr<FbAtoms> m_fbatoms;
 
     FbTk::ResourceManager m_resourcemanager, &m_screen_rm;
+
+    std::string m_RC_PATH;
 
     //--- Resources
 
@@ -255,10 +284,7 @@ private:
 
     std::auto_ptr<Keys> m_key;
 
-    //default arguments for titlebar left and right
-    static Fluxbox *s_singleton;
-
-    typedef std::map<AtomHandler *, std::string> AtomHandlerContainer;
+    typedef std::set<AtomHandler *> AtomHandlerContainer;
     typedef AtomHandlerContainer::iterator AtomHandlerContainerIt;
 
     AtomHandlerContainer m_atomhandler;
@@ -267,12 +293,6 @@ private:
     bool m_restarting;
     bool m_shutdown;
     int m_server_grabs;
-    int m_randr_event_type; ///< the type number of randr event
-    int m_shape_eventbase; ///< event base for shape events
-    bool m_have_shape; ///< if shape is supported by server
-    std::string m_RC_PATH;
-    const char *m_RC_INIT_FILE;
-    Atom m_kwm1_dockwindow, m_kwm2_dockwindow;
 
     AttentionNoticeHandler m_attention_handler;
 };

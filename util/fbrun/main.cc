@@ -20,9 +20,9 @@
 // DEALINGS IN THE SOFTWARE.
 
 #include "FbRun.hh"
-#include "App.hh"
-#include "StringUtil.hh"
-#include "Color.hh"
+#include "FbTk/App.hh"
+#include "FbTk/StringUtil.hh"
+#include "FbTk/Color.hh"
 
 #ifdef XINERAMA
 extern  "C" {
@@ -55,6 +55,7 @@ void showUsage(const char *progname) {
         "   -font [font name]           Text font"<<endl<<
         "   -title [title name]         Set title"<<endl<<
         "   -text [text]                Text input"<<endl<<
+        "   -print                      Print result to stdout"<<endl<<
         "   -w [width]                  Window width in pixels"<<endl<<
         "   -h [height]                 Window height in pixels"<<endl<<
         "   -display [display string]   Display name"<<endl<<
@@ -75,6 +76,7 @@ int main(int argc, char **argv) {
     bool set_pos = false; // set position
     bool near_mouse = false; // popup near mouse
     bool antialias = true; // antialias text
+    bool print = false;
     string fontname; // font name
     string title("Run program"); // default title
     string text;         // default input text
@@ -84,25 +86,28 @@ int main(int argc, char **argv) {
     string history_file("~/.fluxbox/fbrun_history"); // command history file
     // parse arguments
     for (int i=1; i<argc; i++) {
-        if (strcmp(argv[i], "-font") == 0 && i+1 < argc) {
+        string arg = argv[i];
+        if ((arg == "-font" || arg == "--font") && i+1 < argc) {
             fontname = argv[++i];
-        } else if (strcmp(argv[i], "-title") == 0 && i+1 < argc) {
+        } else if (arg == "-print" || arg == "--print") {
+            print = true;
+        } else if ((arg == "-title" || arg == "--title") && i+1 < argc) {
             title = argv[++i];
-        } else if (strcmp(argv[i], "-text") == 0 && i+1 < argc) {
+        } else if ((arg == "-text" || arg == "--text") && i+1 < argc) {
             text = argv[++i];
-        } else if (strcmp(argv[i], "-w") == 0 && i+1 < argc) {
+        } else if (arg == "-w" && i+1 < argc) {
             width = atoi(argv[++i]);
             set_width = true;
-        } else if (strcmp(argv[i], "-h") == 0 && i+1 < argc) {
+        } else if (arg == "-h" && i+1 < argc) {
             height = atoi(argv[++i]);
             set_height = true; // mark true else the height of font will be used
-        } else if (strcmp(argv[i], "-display") == 0 && i+1 < argc) {
+        } else if ((arg == "-display" || arg == "--display") && i+1 < argc) {
             display_name = argv[++i];
-        } else if (strcmp(argv[i], "-pos") == 0 && i+2 < argc) {
+        } else if ((arg == "-pos" || arg == "--pos") && i+2 < argc) {
             x = atoi(argv[++i]);
             y = atoi(argv[++i]);
             set_pos = true;
-        } else if (strcmp(argv[i], "-nearmouse") == 0) {
+        } else if (arg == "-nearmouse" || arg == "--nearmouse") {
             set_pos = true;
             near_mouse = true;
         } else if (strcmp(argv[i], "-fg") == 0 && i+1 < argc) {
@@ -113,7 +118,7 @@ int main(int argc, char **argv) {
             antialias = false;
         } else if (strcmp(argv[i], "-hf") == 0 && i+1 < argc) {
             history_file = argv[++i];
-        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "-help") == 0) {
+        } else if (arg == "-h" || arg == "-help" || arg == "--help") {
             showUsage(argv[0]);
             exit(0);
         } else {
@@ -129,7 +134,7 @@ int main(int argc, char **argv) {
         FbTk::App application(display_name.c_str());
         FbRun fbrun;
 
-        //fbrun.setAntialias(antialias);
+        fbrun.setPrint(print);
 
         if (fontname.size() != 0) {
             if (!fbrun.loadFont(fontname.c_str())) {
@@ -222,7 +227,7 @@ int main(int argc, char **argv) {
 
         application.eventLoop();
 
-    } catch (string errstr) {
+    } catch (string & errstr) {
         cerr<<"Error: "<<errstr<<endl;
     }
 }

@@ -36,8 +36,9 @@
 #include "FbTk/MenuItem.hh"
 #include "FbTk/MenuSeparator.hh"
 #include "FbTk/MultiButtonMenuItem.hh"
+#include "FbTk/MemFun.hh"
 
-#include <typeinfo>
+namespace {
 
 // the menu consists of (* means static)
 //   - icons               * 0
@@ -49,65 +50,61 @@
 //   - remove last         * 6
 //
 
-#define IDX_AFTER_ICONS 2
-#define NR_STATIC_ITEMS 6
+const unsigned int IDX_AFTER_ICONS = 2;
+const unsigned int NR_STATIC_ITEMS = 6;
+
+void add_workspaces(WorkspaceMenu& menu, BScreen& screen) {
+    for (size_t i = 0; i < screen.numberOfWorkspaces(); ++i) {
+        Workspace* w = screen.getWorkspace(i);
+        w->menu().setInternalMenu();
+        FbTk::MultiButtonMenuItem* submenu = new FbTk::MultiButtonMenuItem(5, FbTk::BiDiString(w->name()), &w->menu());
+        FbTk::RefCount<FbTk::Command<void> > jump_cmd(new JumpToWorkspaceCmd(w->workspaceID()));
+        submenu->setCommand(3, jump_cmd);
+        menu.insert(submenu, i + IDX_AFTER_ICONS);
+    }
+}
+
+} // end of anonymous namespace
 
 WorkspaceMenu::WorkspaceMenu(BScreen &screen):
    FbMenu(screen.menuTheme(), 
            screen.imageControl(), 
-           *screen.layerManager().getLayer(Layer::MENU)) {
-
+           *screen.layerManager().getLayer(ResourceLayer::MENU)) {
 
     init(screen);
 }
 
-void WorkspaceMenu::update(FbTk::Subject *subj) {
-
-    if (subj != 0 && typeid(*subj) == typeid(BScreen::ScreenSubject)) {
-        BScreen::ScreenSubject &screen_subj = *static_cast<BScreen::ScreenSubject *>(subj);
-        BScreen &screen = screen_subj.screen();
-        if (subj == &screen.currentWorkspaceSig()) {
-            FbTk::MenuItem *item = 0;
-            for (unsigned int i = 0; i < screen.numberOfWorkspaces(); ++i) {
-                item = find(i + IDX_AFTER_ICONS);
-                if (item && item->isSelected()) {
-                    setItemSelected(i + IDX_AFTER_ICONS, false);
-                    updateMenu(i + IDX_AFTER_ICONS);
-                    break;
-                }
-            }
-            setItemSelected(screen.currentWorkspace()->workspaceID() + IDX_AFTER_ICONS, true);
-            updateMenu(screen.currentWorkspace()->workspaceID() + IDX_AFTER_ICONS);
-        } else if (subj == &screen.workspaceCountSig() || 
-                   subj == &screen.workspaceNamesSig()) {
-            while (numberOfItems() > NR_STATIC_ITEMS) {
-                remove(IDX_AFTER_ICONS);
-            }
-            // for each workspace add workspace name and it's menu
-            // to our workspace menu
-            for (size_t workspace = 0; workspace < screen.numberOfWorkspaces(); 
-                 ++workspace) {
-                Workspace *wkspc = screen.getWorkspace(workspace);
-                wkspc->menu().setInternalMenu();
-                FbTk::MultiButtonMenuItem* mb_menu = new FbTk::MultiButtonMenuItem(5, 
-                                                                                   wkspc->name().c_str(),
-                                                                                   &wkspc->menu());
-                FbTk::RefCount<FbTk::Command<void> > jump_cmd(new JumpToWorkspaceCmd(wkspc->workspaceID()));
-                mb_menu->setCommand(3, jump_cmd);
-                insert(mb_menu, workspace + IDX_AFTER_ICONS);
-            }
-
-            updateMenu(-1);
-        }
-    } else {
-        FbTk::Menu::update(subj);
+void WorkspaceMenu::workspaceInfoChanged( BScreen& screen ) {
+    while (numberOfItems() > NR_STATIC_ITEMS) {
+        remove(IDX_AFTER_ICONS);
     }
+    ::add_workspaces(*this, screen);
+    updateMenu();
+}
+
+void WorkspaceMenu::workspaceChanged(BScreen& screen) {
+    FbTk::MenuItem *item = 0;
+    for (unsigned int i = 0; i < screen.numberOfWorkspaces(); ++i) {
+        item = find(i + IDX_AFTER_ICONS);
+        if (item && item->isSelected()) {
+            setItemSelected(i + IDX_AFTER_ICONS, false);
+            updateMenu();
+            break;
+        }
+    }
+    setItemSelected(screen.currentWorkspace()->workspaceID() + IDX_AFTER_ICONS, true);
+    updateMenu();
 }
 
 void WorkspaceMenu::init(BScreen &screen) {
-    screen.currentWorkspaceSig().attach(this);
-    screen.workspaceCountSig().attach(this);
-    screen.workspaceNamesSig().attach(this);
+
+    join(screen.currentWorkspaceSig(),
+         FbTk::MemFun(*this, &WorkspaceMenu::workspaceChanged));
+    join(screen.workspaceCountSig(),
+         FbTk::MemFun(*this, &WorkspaceMenu::workspaceInfoChanged));
+    join(screen.workspaceNamesSig(),
+         FbTk::MemFun(*this, &WorkspaceMenu::workspaceInfoChanged));
+
     using namespace FbTk;
     _FB_USES_NLS;
 
@@ -117,19 +114,9 @@ void WorkspaceMenu::init(BScreen &screen) {
     insert(_FB_XTEXT(Menu, Icons, "Icons", "Iconic windows menu title"),
            MenuCreator::createMenuType("iconmenu", screen.screenNumber()));
     insert(new FbTk::MenuSeparator());
-    // for each workspace add workspace name and it's menu to our workspace menu
-    for (size_t workspace = 0; workspace < screen.numberOfWorkspaces(); ++workspace) {
-        Workspace *wkspc = screen.getWorkspace(workspace);
-        wkspc->menu().setInternalMenu();
-        FbTk::MultiButtonMenuItem* mb_menu = new FbTk::MultiButtonMenuItem(5, 
-                                                                           wkspc->name().c_str(),
-                                                                           &wkspc->menu());
-        FbTk::RefCount<FbTk::Command<void> > jump_cmd(new JumpToWorkspaceCmd(wkspc->workspaceID()));
-        mb_menu->setCommand(3, jump_cmd);
-        insert(mb_menu, workspace + IDX_AFTER_ICONS);
-    }
-    setItemSelected(screen.currentWorkspace()->workspaceID() + IDX_AFTER_ICONS, true);
 
+    ::add_workspaces(*this, screen);
+    setItemSelected(screen.currentWorkspace()->workspaceID() + IDX_AFTER_ICONS, true);
 
     RefCount<Command<void> > saverc_cmd(new FbCommands::SaveResources());
 
@@ -154,6 +141,6 @@ void WorkspaceMenu::init(BScreen &screen) {
            start_edit);
     insert(_FB_XTEXT(Workspace, RemoveLast, "Remove Last", "Remove the last workspace"), 
           remove_last_cmd);
-    
+
     updateMenu();
 }

@@ -23,20 +23,24 @@
 #define FOCUSABLETHEME_HH
 
 #include "Focusable.hh"
-#include "FbTk/Observer.hh"
+#include "FbTk/MemFun.hh"
 #include "FbTk/Theme.hh"
 
 template <typename BaseTheme>
-class FocusableTheme: public FbTk::ThemeProxy<BaseTheme>,
-                      private FbTk::Observer {
+class FocusableTheme: public FbTk::ThemeProxy<BaseTheme> {
 public:
     FocusableTheme(Focusable &win, FbTk::ThemeProxy<BaseTheme> &focused,
                    FbTk::ThemeProxy<BaseTheme> &unfocused):
         m_win(win), m_focused_theme(focused), m_unfocused_theme(unfocused) {
-        m_win.focusSig().attach(this);
-        m_win.attentionSig().attach(this);
-        m_focused_theme.reconfigSig().attach(this);
-        m_unfocused_theme.reconfigSig().attach(this);
+
+        m_signals.join(m_win.focusSig(),
+                FbTk::MemFunIgnoreArgs(m_reconfig_sig, &FbTk::Signal<>::emit));
+        m_signals.join(m_win.attentionSig(),
+                FbTk::MemFunIgnoreArgs(m_reconfig_sig, &FbTk::Signal<>::emit));
+        m_signals.join(m_focused_theme.reconfigSig(),
+                FbTk::MemFun(m_reconfig_sig, &FbTk::Signal<>::emit));
+        m_signals.join(m_unfocused_theme.reconfigSig(),
+                FbTk::MemFun(m_reconfig_sig, &FbTk::Signal<>::emit));
     }
 
     Focusable &win() { return m_win; }
@@ -48,8 +52,7 @@ public:
     FbTk::ThemeProxy<BaseTheme> &unfocusedTheme() { return m_unfocused_theme; }
     const FbTk::ThemeProxy<BaseTheme> &unfocusedTheme() const { return m_unfocused_theme; }
 
-    FbTk::Subject &reconfigSig() { return m_reconfig_sig; }
-    const FbTk::Subject &reconfigSig() const { return m_reconfig_sig; }
+    FbTk::Signal<> &reconfigSig() { return m_reconfig_sig; }
 
     virtual BaseTheme &operator *() {
         return (m_win.isFocused() || m_win.getAttentionState()) ?
@@ -61,11 +64,10 @@ public:
     }
 
 private:
-    void update(FbTk::Subject *subj) { m_reconfig_sig.notify(); }
-
     Focusable &m_win;
     FbTk::ThemeProxy<BaseTheme> &m_focused_theme, &m_unfocused_theme;
-    FbTk::Subject m_reconfig_sig;
+    FbTk::Signal<> m_reconfig_sig;
+    FbTk::SignalTracker m_signals;
 };
 
 #endif // FOCUSABLETHEME_HH

@@ -32,36 +32,25 @@ class ImageBase;
 class PixmapWithMask;
 
 /// loads images
-class Image {
-public:
-
-    /// called at FbTk::App creation time, init some internal stuff
-    static void init();
-
-    /// called at FbTk:App destruction time, frees stuff allocated by init()
-    static void shutdown();
+namespace Image {
 
     /// @return an instance of PixmapWithMask on success, 0 on failure
-    static PixmapWithMask *load(const std::string &filename, int screen_num);
+    PixmapWithMask *load(const std::string &filename, int screen_num);
     /// for register file type and imagebase
     /// @return false on failure
-    static bool registerType(const std::string &type, ImageBase &base);
+    bool registerType(const std::string &type, ImageBase &base);
     /// removes a imagebase class from register
     /// @return false on failure
-    static void remove(ImageBase &base);
+    void remove(ImageBase &base);
     /// adds a path to search images from
-    static void addSearchPath(const std::string &search_path);
+    void addSearchPath(const std::string &search_path);
     /// removes a path to search images from
-    static void removeSearchPath(const std::string &search_path);
+    void removeSearchPath(const std::string &search_path);
     /// adds a path to search images from
-    static void removeAllSearchPaths();
-private:
-    typedef std::map<std::string, ImageBase *> ImageMap;
-    typedef std::list<std::string> StringList;
-
-    static ImageMap s_image_map;
-    static StringList s_search_paths;
-};
+    void removeAllSearchPaths();
+    /// locates an image in the search path
+    std::string locateFile(const std::string &filename);
+}
 
 /// common interface for all image classes
 class ImageBase {
@@ -73,5 +62,4 @@ public:
 } // end namespace FbTk
 
 #endif // IMAGE_HH
-
 

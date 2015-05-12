@@ -31,19 +31,19 @@
 
 namespace FbTk {
 
-class Color;
 class ImageControl;
 class Texture;
 
 /// Renders texture to pixmap
 /**
-  This is used with BImageControl to render textures
+  This is used with ImageControl to render textures
 */
+
+struct RGBA;
 class TextureRender {
 public:
     TextureRender(ImageControl &ic, unsigned int width, unsigned int height, 
-                  Orientation orient = ROT0,
-                  XColor *_colors=0, size_t num_colors=0);
+                  Orientation orient = ROT0);
     ~TextureRender();
     /// render to pixmap
     Pixmap render(const FbTk::Texture &src_texture);
@@ -66,36 +66,15 @@ private:
        @returns allocated and rendered XImage, user is responsible to deallocate
     */
     XImage *renderXImage();
-    /**
-       @name render functions
-    */
-    //@{
-    void invert();
-    void bevel1();
-    void bevel2();
-    void dgradient();
-    void egradient();
-    void hgradient();
-    void pgradient();
-    void rgradient();
-    void vgradient();
-    void cdgradient();
-    void pcgradient();
-    //@}
 
     ImageControl &control;
-    bool interlaced;
 
-    XColor *colors; // color table
+    int cpc, cpccpc;
 
-    const FbTk::Color *from, *to;
-    int red_offset, green_offset, blue_offset, red_bits, green_bits, blue_bits,
-        ncolors, cpc, cpccpc;
-    unsigned char *red, *green, *blue;
-    const unsigned char *red_table, *green_table, *blue_table;
+    RGBA* rgba;
+    //unsigned char *red, *green, *blue;
     Orientation orientation;
     unsigned int width, height;
-    unsigned int *xtable, *ytable;
 };
 
 } // end namespace FbTk 

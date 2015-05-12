@@ -27,13 +27,14 @@
 #include "Workspace.hh"
 
 #include "FbTk/ImageControl.hh"
+#include "FbTk/MemFun.hh"
 
 #include <algorithm>
 
 WorkspaceNameTool::WorkspaceNameTool(const FbTk::FbWindow &parent, 
         FbTk::ThemeProxy<ToolTheme> &theme, BScreen &screen):
     ToolbarItem(ToolbarItem::FIXED),
-    m_button(parent, theme->font(), "a workspace name"),
+    m_button(parent, theme->font(), FbTk::BiDiString("a workspace name")),
     m_theme(theme),
     m_screen(screen),
     m_pixmap(0) {
@@ -42,9 +43,12 @@ WorkspaceNameTool::WorkspaceNameTool(const FbTk::FbWindow &parent,
     m_button.setText(m_screen.currentWorkspace()->name());
 
     // setup signals
-    screen.workspaceNamesSig().attach(this);
-    screen.currentWorkspaceSig().attach(this);
-    theme.reconfigSig().attach(this);
+    join(screen.currentWorkspaceSig(),
+         FbTk::MemFunIgnoreArgs(*this, &WorkspaceNameTool::update));
+    join(screen.workspaceNamesSig(),
+         FbTk::MemFunIgnoreArgs(*this, &WorkspaceNameTool::update));
+
+    join(theme.reconfigSig(), FbTk::MemFun(*this, &WorkspaceNameTool::update));
 }
 
 WorkspaceNameTool::~WorkspaceNameTool() {
@@ -66,12 +70,11 @@ void WorkspaceNameTool::moveResize(int x, int y,
     m_button.moveResize(x, y, width, height);
 }
 
-void WorkspaceNameTool::update(FbTk::Subject *subj) {
-
+void WorkspaceNameTool::update() {
     m_button.setText(m_screen.currentWorkspace()->name());
     if (m_button.width() != width()) {
         resize(width(), height());
-        resizeSig().notify();
+        resizeSig().emit();
     }
     reRender();
     m_button.clear();
@@ -85,10 +88,8 @@ unsigned int WorkspaceNameTool::width() const {
 
     const BScreen::Workspaces& workspaces = m_screen.getWorkspacesList();
     BScreen::Workspaces::const_iterator it;
-    for (it = workspaces.begin(); it != workspaces.end(); it++) {
-        const std::string &name = (*it)->name();
-        max_size = std::max(m_theme->font().textWidth(name, name.size()), 
-                            max_size);
+    for (it = workspaces.begin(); it != workspaces.end(); ++it) {
+        max_size = std::max(m_theme->font().textWidth((*it)->name()), max_size);
     }
     // so align text dont cut the last character
     max_size += 2;
@@ -103,10 +104,8 @@ unsigned int WorkspaceNameTool::height() const {
     unsigned int max_size = 0;
     const BScreen::Workspaces& workspaces = m_screen.getWorkspacesList();
     BScreen::Workspaces::const_iterator it;
-    for (it = workspaces.begin(); it != workspaces.end(); it++) {
-        const std::string &name = (*it)->name();
-        max_size = std::max(m_theme->font().textWidth(name, name.size()), 
-                            max_size);
+    for (it = workspaces.begin(); it != workspaces.end(); ++it) {
+        max_size = std::max(m_theme->font().textWidth((*it)->name()), max_size);
     }
     // so align text dont cut the last character
     max_size += 2;
@@ -144,7 +143,7 @@ void WorkspaceNameTool::reRender() {
     }
 }
 
-void WorkspaceNameTool::renderTheme(unsigned char alpha) {
+void WorkspaceNameTool::renderTheme(int alpha) {
     
     m_button.setJustify(m_theme->justify());
     m_button.setBorderWidth(m_theme->border().width());

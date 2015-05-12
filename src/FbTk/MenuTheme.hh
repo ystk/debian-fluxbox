@@ -34,11 +34,6 @@ namespace FbTk {
 
 class MenuTheme: public Theme, public ThemeProxy<MenuTheme> {
 public:
-    //!! TODO
-    // this isn't actually used with a theme item
-    // see setMenuMode() for more info
-    enum MenuMode {CLICK_OPEN, DELAY_OPEN};
-
     enum BulletType { EMPTY, SQUARE, TRIANGLE, DIAMOND};
     MenuTheme(int screen_num);
     virtual ~MenuTheme();
@@ -81,9 +76,12 @@ public:
     Font &titleFont() { return *titlefont; }
     const Font &frameFont() const { return *framefont; }
     Font &frameFont() { return *framefont; }
+    const Font &hiliteFont() const { return *hilitefont; }
+    Font &hiliteFont() { return *hilitefont; }
     ///@}
 
     Justify frameFontJustify() const { return *framefont_justify; }
+    Justify hiliteFontJustify() const { return *hilitefont_justify; }
     Justify titleFontJustify() const { return *titlefont_justify; }
 
     /**
@@ -92,13 +90,13 @@ public:
     ///@{
     const GContext &titleTextGC() const { return t_text_gc; }
     const GContext &frameTextGC() const { return f_text_gc; }
-    const GContext &frameUnderlineGC() const { return u_text_gc; }
+    const GContext &hiliteUnderlineGC() const { return u_text_gc; }
     const GContext &hiliteTextGC() const { return h_text_gc; }
     const GContext &disableTextGC() const { return d_text_gc; }
     const GContext &hiliteGC() const { return hilite_gc; }
     GContext &titleTextGC() { return t_text_gc; }
     GContext &frameTextGC() { return f_text_gc; }
-    GContext &frameUnderlineGC() { return u_text_gc; }
+    GContext &hiliteUnderlineGC() { return u_text_gc; }
     GContext &hiliteTextGC() { return h_text_gc; }
     GContext &disableTextGC() { return d_text_gc; }
     GContext &hiliteGC() { return hilite_gc; }
@@ -112,16 +110,12 @@ public:
     unsigned int bevelWidth() const { return *m_bevel_width; }
 
     unsigned char alpha() const { return m_alpha; }
-    void setAlpha(unsigned char alpha) { m_alpha = alpha; }
+    void setAlpha(int alpha) { m_alpha = alpha; }
     // this isn't actually a theme item
     // but we'll let it be here for now, until there's a better way to
     // get resources into menu
-    void setMenuMode(MenuMode mode) { m_menumode = mode; }
-    MenuMode menuMode() const { return m_menumode; }
-    void setDelayOpen(int msec) { m_delayopen = msec; }
-    void setDelayClose(int msec) { m_delayclose = msec; }
-    int delayOpen() const { return m_delayopen; }
-    int delayClose() const { return m_delayclose; }
+    void setDelay(int msec) { m_delay = msec; }
+    int getDelay() const { return m_delay; }
 
     const Color &borderColor() const { return *m_border_color; }
     Shape::ShapePlace shapePlaces() const { return *m_shapeplace; }
@@ -139,8 +133,7 @@ public:
             m_hl_selected_pixmap->pixmap().dontFree();
     }
 
-    virtual Subject &reconfigSig() { return Theme::reconfigSig(); }
-    virtual const Subject &reconfigSig() const { return Theme::reconfigSig(); }
+    virtual Signal<> &reconfigSig() { return Theme::reconfigSig(); }
 
     virtual MenuTheme &operator *() { return *this; }
     virtual const MenuTheme &operator *() const { return *this; }
@@ -148,8 +141,8 @@ public:
 private:
     ThemeItem<Color> t_text, f_text, h_text, d_text, u_text;
     ThemeItem<Texture> title, frame, hilite;
-    ThemeItem<Font> titlefont, framefont;
-    ThemeItem<Justify> framefont_justify, titlefont_justify;
+    ThemeItem<Font> titlefont, framefont, hilitefont;
+    ThemeItem<Justify> framefont_justify, hilitefont_justify, titlefont_justify;
     ThemeItem<Justify> bullet_pos;
     ThemeItem<BulletType> m_bullet;
     ThemeItem<Shape::ShapePlace> m_shapeplace;
@@ -163,10 +156,8 @@ private:
     Display *m_display;
     GContext t_text_gc, f_text_gc, u_text_gc, h_text_gc, d_text_gc, hilite_gc;
 
-    unsigned char m_alpha;
-    MenuMode m_menumode;
-    unsigned int m_delayopen; ///< in msec
-    unsigned int m_delayclose; ///< in msec
+    int m_alpha;
+    unsigned int m_delay; ///< in msec
     unsigned int m_real_title_height; ///< the calculated item height (from font and menu.titleHeight)
     unsigned int m_real_item_height; ///< the calculated item height (from font and menu.itemHeight)
 };

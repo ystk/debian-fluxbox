@@ -24,7 +24,9 @@
 // Tools
 #include "ButtonTool.hh"
 #include "ClockTool.hh"
+#ifdef USE_SYSTRAY
 #include "SystemTray.hh"
+#endif
 #include "IconbarTool.hh"
 #include "WorkspaceNameTool.hh"
 #include "ArrowButton.hh"
@@ -35,38 +37,27 @@
 
 #include "FbTk/CommandParser.hh"
 #include "Screen.hh"
+#include "ScreenPlacement.hh"
 #include "Toolbar.hh"
 #include "fluxbox.hh"
-
-#include <utility>
 
 namespace {
 class ShowMenuAboveToolbar: public FbTk::Command<void> {
 public:
     explicit ShowMenuAboveToolbar(Toolbar &tbar):m_tbar(tbar) { }
     void execute() {
-        // get last button pos
-        const XEvent &event = Fluxbox::instance()->lastEvent();
-        int head = m_tbar.screen().getHead(event.xbutton.x_root, event.xbutton.y_root);
-        std::pair<int, int> m = 
-            m_tbar.screen().clampToHead( head,
-                                         event.xbutton.x_root - (m_tbar.menu().width() / 2),
-                                         event.xbutton.y_root - (m_tbar.menu().height() / 2),
-                                         m_tbar.menu().width(),
-                                         m_tbar.menu().height());
-        m_tbar.menu().setScreen(m_tbar.screen().getHeadX(head),
-                                m_tbar.screen().getHeadY(head),
-                                m_tbar.screen().getHeadWidth(head),
-                                m_tbar.screen().getHeadHeight(head));
-        m_tbar.menu().move(m.first, m.second);
-        m_tbar.menu().show();
-        m_tbar.menu().grabInputFocus();
+
+        const XEvent& e= Fluxbox::instance()->lastEvent();
+
+        m_tbar.screen()
+            .placementStrategy()
+            .placeAndShowMenu(m_tbar.menu(), e.xbutton.x_root, e.xbutton.y_root, false);
     }
 private:
     Toolbar &m_tbar;
 };
 
-};
+}
 
 ToolFactory::ToolFactory(BScreen &screen):m_screen(screen),
     m_clock_theme(screen.screenNumber(), "toolbar.clock", "Toolbar.Clock"),
@@ -74,7 +65,7 @@ ToolFactory::ToolFactory(BScreen &screen):m_screen(screen),
                                    "toolbar.clock", "Toolbar.Clock")),
     m_workspace_theme(new WorkspaceNameTheme(screen.screenNumber(), "toolbar.workspace", "Toolbar.Workspace")),
     m_systray_theme(new ButtonTheme(screen.screenNumber(), "toolbar.systray", "Toolbar.Systray",
-                                    "toolbar.clock", "Toolbar.Systray")),
+                                    "toolbar.clock", "Toolbar.Clock")),
     m_iconbar_theme(screen.screenNumber(), "toolbar.iconbar", "Toolbar.Iconbar"),
     m_focused_iconbar_theme(screen.screenNumber(), "toolbar.iconbar.focused", "Toolbar.Iconbar.Focused"),
     m_unfocused_iconbar_theme(screen.screenNumber(), "toolbar.iconbar.unfocused", "Toolbar.Iconbar.Unfocused") {
@@ -98,39 +89,27 @@ ToolbarItem *ToolFactory::create(const std::string &name, const FbTk::FbWindow &
     } else if (name == "iconbar") {
         item = new IconbarTool(parent, m_iconbar_theme, m_focused_iconbar_theme, m_unfocused_iconbar_theme, screen(), tbar.menu());
     } else if (name == "systemtray") {
+#ifdef USE_SYSTRAY
         item = new SystemTray(parent, dynamic_cast<ButtonTheme &>(*m_systray_theme), screen());
+#endif
     } else if (name == "clock") {
         item = new ClockTool(parent, m_clock_theme, screen(), tbar.menu());
-    } else if (name == "nextworkspace" || 
-               name == "prevworkspace") {
-
-        FbTk::RefCount<FbTk::Command<void> > cmd(FbTk::CommandParser<void>::instance().parse(name));
-        if (*cmd == 0) // we need a command
-            return 0;
-
-		// TODO maybe direction of arrows should depend on toolbar layout ?
-        FbTk::FbDrawable::TriangleType arrow_type = FbTk::FbDrawable::LEFT;
-        if (name == "nextworkspace")
-            arrow_type = FbTk::FbDrawable::RIGHT;
-
-        ArrowButton *win = new ArrowButton(arrow_type, parent,
-                                           0, 0,
-                                           button_size, button_size);
-        win->setOnClick(cmd);
-        item = new ButtonTool(win, ToolbarItem::SQUARE, 
-                              dynamic_cast<ButtonTheme &>(*m_button_theme),
-                              screen().imageControl());
-
     } else {
 
-        FbTk::RefCount<FbTk::Command<void> > cmd(FbTk::CommandParser<void>::instance().parse(name));
-        if (*cmd == 0) // we need a command
+        std::string cmd_str = name;
+        if (name == "prevwindow" || name == "nextwindow") {
+            cmd_str += " (workspace=[current])";
+        }
+
+        FbTk::RefCount<FbTk::Command<void> > cmd(FbTk::CommandParser<void>::instance().parse(cmd_str));
+        if (cmd == 0) // we need a command
             return 0;
 
-        FbTk::FbDrawable::TriangleType arrow_type = FbTk::FbDrawable::LEFT;
-        if (name == "nextwindow")
-            arrow_type = FbTk::FbDrawable::RIGHT;
-                    
+        // TODO maybe direction of arrows should depend on toolbar layout ?
+        FbTk::FbDrawable::TriangleType arrow_type = FbTk::FbDrawable::RIGHT;
+        if (name.find("prev") != std::string::npos)
+            arrow_type = FbTk::FbDrawable::LEFT;
+
         ArrowButton *win = new ArrowButton(arrow_type, parent,
                                            0, 0,
                                            button_size, button_size);
@@ -138,7 +117,6 @@ ToolbarItem *ToolFactory::create(const std::string &name, const FbTk::FbWindow &
         item = new ButtonTool(win, ToolbarItem::SQUARE, 
                               dynamic_cast<ButtonTheme &>(*m_button_theme),
                               screen().imageControl());
-
     }
 
     if (item)

@@ -35,10 +35,12 @@
 #include "FbTk/MenuTheme.hh"
 #include "FbTk/EventHandler.hh"
 #include "FbTk/Resource.hh"
-#include "FbTk/Subject.hh"
 #include "FbTk/MultLayers.hh"
 #include "FbTk/NotCopyable.hh"
-#include "FbTk/Observer.hh"
+#include "FbTk/Signal.hh"
+#include "FbTk/RelCalcHelper.hh"
+
+#include "FocusControl.hh"
 
 #include <X11/Xresource.h>
 
@@ -63,7 +65,6 @@ class Strut;
 class Slit;
 class Toolbar;
 class HeadArea;
-class FocusControl;
 class ScreenPlacement;
 class TooltipWindow;
 class OSDWindow;
@@ -71,9 +72,8 @@ class OSDWindow;
 namespace FbTk {
 class Menu;
 class ImageControl;
-class XLayerItem;
+class LayerItem;
 class FbWindow;
-class Subject;
 }
 
 
@@ -81,18 +81,8 @@ class Subject;
 /**
  Create workspaces, handles switching between workspaces and windows
  */
-class BScreen: public FbTk::EventHandler, public FbTk::Observer,
-               private FbTk::NotCopyable {
+class BScreen: public FbTk::EventHandler, private FbTk::NotCopyable {
 public:
-    /// a window becomes active / focussed on a different workspace
-    enum FollowModel {
-        IGNORE_OTHER_WORKSPACES = 0, ///< who cares?
-        FOLLOW_ACTIVE_WINDOW,     ///< go to that workspace
-        SEMIFOLLOW_ACTIVE_WINDOW, ///< fetch iconified windows, else follow
-        FETCH_ACTIVE_WINDOW       ///< put that window to the current workspace
-    };
-
-
     typedef std::list<FluxboxWindow *> Icons;
 
     typedef std::vector<Workspace *> Workspaces;
@@ -109,7 +99,7 @@ public:
 
     bool isRootColormapInstalled() const { return root_colormap_installed; }
     bool isScreenManaged() const { return managed; }
-    bool isWorkspaceWarping() const { return *resource.workspace_warping; }
+    bool isWorkspaceWarping() const { return (m_workspaces_list.size() > 1) && *resource.workspace_warping; }
     bool doAutoRaise() const { return *resource.auto_raise; }
     bool clickRaises() const { return *resource.click_raises; }
     bool doOpaqueMove() const { return *resource.opaque_move; }
@@ -134,8 +124,6 @@ public:
     FbWinFrame::TabPlacement getTabPlacement() const { return *resource.tab_placement; }
 
     unsigned int noFocusWhileTypingDelay() const { return *resource.typing_delay; }
-    FollowModel getFollowModel() const { return *resource.follow_model; }
-    FollowModel getUserFollowModel() const { return *resource.user_follow_model; }
     const bool allowRemoteActions() const { return *resource.allow_remote_actions; }
     const bool clientMenuUsePixmap() const { return *resource.clientmenu_use_pixmap; }
     const bool getDefaultInternalTabs() const { return *resource.default_internal_tabs; }
@@ -208,34 +196,31 @@ public:
        @name Screen signals
     */
     //@{
+    typedef FbTk::Signal<BScreen&> ScreenSignal;
     /// client list signal
-    FbTk::Subject &clientListSig() { return m_clientlist_sig; }
+    ScreenSignal &clientListSig() { return m_clientlist_sig; }
     /// icon list sig
-    FbTk::Subject &iconListSig() { return m_iconlist_sig; }
+    ScreenSignal &iconListSig() { return m_iconlist_sig; }
     /// workspace count signal
-    FbTk::Subject &workspaceCountSig() { return m_workspacecount_sig; }
+    ScreenSignal &workspaceCountSig() { return m_workspacecount_sig; }
     /// workspace names signal
-    FbTk::Subject &workspaceNamesSig() { return m_workspacenames_sig; }
+    ScreenSignal &workspaceNamesSig() { return m_workspacenames_sig; }
     /// workspace area signal
-    FbTk::Subject &workspaceAreaSig() { return m_workspace_area_sig; }
+    ScreenSignal &workspaceAreaSig() { return m_workspace_area_sig; }
     /// current workspace signal
-    FbTk::Subject &currentWorkspaceSig() { return m_currentworkspace_sig; }
+    ScreenSignal &currentWorkspaceSig() { return m_currentworkspace_sig; }
     /// focused window signal
-    FbTk::Subject &focusedWindowSig() { return m_focusedwindow_sig; }
+    FbTk::Signal<BScreen&, FluxboxWindow*, WinClient*> &focusedWindowSig() { return m_focusedwindow_sig; }
     /// reconfigure signal
-    FbTk::Subject &reconfigureSig() { return m_reconfigure_sig; }
-    FbTk::Subject &resizeSig() { return m_resize_sig; }
-    FbTk::Subject &bgChangeSig() { return m_bg_change_sig; }
+    ScreenSignal &reconfigureSig() { return m_reconfigure_sig; }
+    ScreenSignal &resizeSig() { return m_resize_sig; }
+    ScreenSignal &bgChangeSig() { return m_bg_change_sig; }
     //@}
-
-    /// called when the screen receives a signal from a subject
-    void update(FbTk::Subject *subj);
 
     void propertyNotify(Atom atom);
     void keyPressEvent(XKeyEvent &ke);
     void keyReleaseEvent(XKeyEvent &ke);
     void buttonPressEvent(XButtonEvent &be);
-    void notifyUngrabKeyboard();
 
     /**
      * Cycles focus of windows
@@ -244,6 +229,8 @@ public:
      * @param reverse the order of cycling
      */
     void cycleFocus(int opts = 0, const ClientPattern *pat = 0, bool reverse = false);
+
+    bool isCycling() const { return m_cycling; }
 
     /**
      * Creates an empty menu with specified label
@@ -310,20 +297,16 @@ public:
     int addWorkspace();
     int removeLastWorkspace();
     // scroll workspaces
-    /// go to next workspace ( right )
-    void nextWorkspace() { nextWorkspace(1); }
-    /// go to previous workspace
-    void prevWorkspace() { prevWorkspace(1); }
     /**
      * Jump forward to a workspace
      * @param delta number of steps to jump
      */
-    void nextWorkspace(int delta);
+    void nextWorkspace(int delta = 1);
     /**
      * Jump backwards to a workspace
      * @param delta number of steps to jump
      */
-    void prevWorkspace(int delta);
+    void prevWorkspace(int delta = 1);
     /**
      * Jump right to a workspace.
      * @param delta number of steps to jump
@@ -388,13 +371,13 @@ public:
     void hideGeometry();
 
     /// @param text the text to be displayed in the tooltip window
-    void showTooltip(const std::string &text);
+    void showTooltip(const FbTk::BiDiString &text);
     /// Hides the tooltip window
     void hideTooltip();
 
     TooltipWindow& tooltipWindow() { return *m_tooltip_window; }
 
-    void setLayer(FbTk::XLayerItem &item, int layernum);
+    void setLayer(FbTk::LayerItem &item, int layernum);
     // remove? no, items are never removed from their layer until they die
 
     /// updates root window size and resizes/reconfigures screen clients
@@ -471,43 +454,46 @@ public:
     /// when screen dies
     void addManagedResource(FbTk::Resource_base *resource);
 
-    /**
-     * Used to emit different signals for the screen
-     */
-    class ScreenSubject:public FbTk::Subject {
-    public:
-        ScreenSubject(BScreen &scr):m_scr(scr) { }
-        const BScreen &screen() const { return m_scr; }
-        BScreen &screen() { return m_scr; }
-    private:
-        BScreen &m_scr;
-    };
+    int calRelativeSize(int head, int i, char type);
+    int calRelativeWidth(int head, int i);
+    int calRelativeHeight(int head, int i);
+
+    int calRelativePosition(int head, int i, char type);
+    int calRelativePositionWidth(int head, int i);
+    int calRelativePositionHeight(int head, int i);
+
+    int calRelativeDimension(int head, int i, char type);
+    int calRelativeDimensionWidth(int head, int i);
+    int calRelativeDimensionHeight(int head, int i);
 
 private:
     void setupConfigmenu(FbTk::Menu &menu);
     void renderGeomWindow();
     void renderPosWindow();
+    void focusedWinFrameThemeReconfigured();
+
+    int getGap(int head, const char type);
+    float getXGap(int head);
+    float getYGap(int head);
 
     const Strut* availableWorkspaceArea(int head) const;
 
-    ScreenSubject
-    m_clientlist_sig,  ///< client signal
-        m_iconlist_sig, ///< notify if a window gets iconified/deiconified
-        m_workspacecount_sig, ///< workspace count signal
-        m_workspacenames_sig, ///< workspace names signal
-        m_workspace_area_sig, ///< workspace area changed signal
-        m_currentworkspace_sig, ///< current workspace signal
-        m_focusedwindow_sig, ///< focused window signal
-        m_reconfigure_sig, ///< reconfigure signal
-        m_resize_sig, ///< resize signal
-        m_bg_change_sig; ///< background change signal
+    FbTk::SignalTracker m_tracker;
+    ScreenSignal m_reconfigure_sig; ///< reconfigure signal
+
+    FbTk::Signal<BScreen&, FluxboxWindow*, WinClient*> m_focusedwindow_sig;  ///< focused window signal
+    ScreenSignal m_resize_sig; ///< resize signal
+    ScreenSignal m_workspace_area_sig; ///< workspace area changed signal
+    ScreenSignal m_iconlist_sig; ///< notify if a window gets iconified/deiconified
+    ScreenSignal m_clientlist_sig;  ///< client signal
+    ScreenSignal m_bg_change_sig; ///< background change signal
+    ScreenSignal m_workspacecount_sig; ///< workspace count signal
+    ScreenSignal m_currentworkspace_sig; ///< current workspace signal
+    ScreenSignal m_workspacenames_sig; ///< workspace names signal
 
     FbTk::MultLayers m_layermanager;
 
     bool root_colormap_installed, managed;
-
-    GC opGC;
-
 
     std::auto_ptr<FbTk::ImageControl> m_image_control;
     std::auto_ptr<FbMenu> m_configmenu, m_rootmenu, m_workspacemenu, m_windowmenu;
@@ -548,20 +534,12 @@ private:
             max_ignore_inc, max_disable_move, max_disable_resize,
             workspace_warping, show_window_pos, auto_raise, click_raises;
         FbTk::Resource<std::string> default_deco;
-        FbTk::Resource<std::string> rootcommand;
         FbTk::Resource<FbWinFrame::TabPlacement> tab_placement;
         FbTk::Resource<std::string> windowmenufile;
         FbTk::Resource<unsigned int> typing_delay;
-        FbTk::Resource<FollowModel> follow_model, user_follow_model;
         FbTk::Resource<int> workspaces, edge_snap_threshold, focused_alpha,
-            unfocused_alpha, menu_alpha, menu_delay, menu_delay_close,
+            unfocused_alpha, menu_alpha, menu_delay,
             tab_width, tooltip_delay;
-        FbTk::Resource<FbTk::MenuTheme::MenuMode> menu_mode;
-
-        FbTk::Resource<int> gc_line_width;
-        FbTk::Resource<FbTk::GContext::LineStyle> gc_line_style;
-        FbTk::Resource<FbTk::GContext::JoinStyle> gc_join_style;
-        FbTk::Resource<FbTk::GContext::CapStyle>  gc_cap_style;
         FbTk::Resource<bool> allow_remote_actions;
         FbTk::Resource<bool> clientmenu_use_pixmap;
         FbTk::Resource<bool> tabs_use_pixmap;
@@ -596,7 +574,11 @@ private:
     std::vector<HeadArea *> m_head_areas;
 
     struct XineramaHeadInfo {
-        int x, y, width, height;
+        int _x, _y, _width, _height;
+        int x() const { return _x; }
+        int y() const { return _y; }
+        int width() const { return _width; }
+        int height() const { return _height; }
     } *m_xinerama_headinfo;
 
     bool m_restart, m_shutdown;

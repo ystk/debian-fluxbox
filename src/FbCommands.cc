@@ -1,5 +1,5 @@
 // FbCommands.cc for Fluxbox
-// Copyright (c) 2003 - 2006 Henrik Kinnunen (fluxgen at fluxbox dot org)
+// Copyright (c) 2003 - 2008 Henrik Kinnunen (fluxgen at fluxbox dot org)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the "Software"),
@@ -22,6 +22,7 @@
 #include "FbCommands.hh"
 #include "fluxbox.hh"
 #include "Screen.hh"
+#include "ScreenPlacement.hh"
 #include "CommandDialog.hh"
 #include "FocusControl.hh"
 #include "Workspace.hh"
@@ -71,7 +72,7 @@ using std::ios;
 
 namespace {
 
-void showMenu(const BScreen &screen, FbTk::Menu &menu) {
+void showMenu(BScreen &screen, FbTk::Menu &menu) {
 
     // check if menu has changed
     if (typeid(menu) == typeid(FbMenu)) {
@@ -82,36 +83,19 @@ void showMenu(const BScreen &screen, FbTk::Menu &menu) {
 
     FbMenu::setWindow(FocusControl::focusedFbWindow());
 
-    Window root_ret; // not used
-    Window window_ret; // not used
+    Window ignored_w;
+    int ignored_i;
+    unsigned int ignored_ui;
 
-    int rx = 0, ry = 0;
-    int wx, wy; // not used
-    unsigned int mask; // not used
+    int x = 0;
+    int y = 0;
 
     XQueryPointer(menu.fbwindow().display(),
-                  screen.rootWindow().window(), &root_ret, &window_ret,
-                  &rx, &ry, &wx, &wy, &mask);
+                  screen.rootWindow().window(), &ignored_w, &ignored_w,
+                  &x, &y, &ignored_i, &ignored_i, &ignored_ui);
 
-    int borderw = menu.fbwindow().borderWidth();
-    int head = screen.getHead(rx, ry);
-
-    menu.updateMenu();
-    pair<int, int> m =
-        screen.clampToHead(head,
-                           rx - menu.width() / 2,
-                           ry - menu.titleWindow().height() / 2,
-                           menu.width() + 2*borderw,
-                           menu.height() + 2*borderw);
-
-    menu.move(m.first, m.second);
-    menu.setScreen(screen.getHeadX(head),
-                   screen.getHeadY(head),
-                   screen.getHeadWidth(head),
-                   screen.getHeadHeight(head));
-
-    menu.show();
-    menu.grabInputFocus();
+    screen.placementStrategy()
+        .placeAndShowMenu(menu, x, y, false);
 }
 
 }
@@ -129,22 +113,35 @@ ExecuteCmd::ExecuteCmd(const string &cmd, int screen_num):m_cmd(cmd), m_screen_n
 }
 
 void ExecuteCmd::execute() {
-#ifndef __EMX__
     run();
-#else //   __EMX__
-    spawnlp(P_NOWAIT, "cmd.exe", "cmd.exe", "/c", m_cmd.c_str(), static_cast<void*>(NULL));
-#endif // !__EMX__
-
 }
 
 int ExecuteCmd::run() {
+#if defined(__EMX__) || defined(_WIN32)
+#ifndef PATH_MAX
+#define PATH_MAX 1024
+#endif
+    char comspec[PATH_MAX] = {0};
+    char * env_var = getenv("COMSPEC");
+    if (env_var != NULL) {
+        strncpy(comspec, env_var, PATH_MAX - 1);
+        comspec[PATH_MAX - 1] = '\0';
+    } else {
+        strncpy(comspec, "cmd.exe", 7);
+        comspec[7] = '\0';
+    }
+
+    return spawnlp(P_NOWAIT, comspec, comspec, "/c", m_cmd.c_str(), static_cast<void*>(NULL));
+#else
     pid_t pid = fork();
     if (pid)
         return pid;
 
-    string displaystring("DISPLAY=");
-    displaystring += DisplayString(FbTk::App::instance()->display());
-    char intbuff[64];
+    // 'display' is given as 'host:number.screen'. we want to give the
+    // new app a good home, so we remove '.screen' from what is given
+    // us from the xserver and replace it with the screen_num of the Screen
+    // the user currently points at with the mouse
+    string display = DisplayString(FbTk::App::instance()->display());
     int screen_num = m_screen_num;
     if (screen_num < 0) {
         if (Fluxbox::instance()->mouseScreen() == 0)
@@ -153,7 +150,16 @@ int ExecuteCmd::run() {
             screen_num = Fluxbox::instance()->mouseScreen()->screenNumber();
     }
 
-    sprintf(intbuff, "%d", screen_num);
+    // strip away the '.screen'
+    size_t dot = display.rfind(':');
+    dot = display.find('.', dot);
+    if (dot != string::npos) { // 'display' has actually a '.screen' part
+        display.erase(dot);
+    }
+    display += '.';
+    display += FbTk::StringUtil::number2String(screen_num);
+
+    FbTk::App::setenv("DISPLAY", display.c_str());
 
     // get shell path from the environment
     // this process exits immediately, so we don't have to worry about memleaks
@@ -161,16 +167,12 @@ int ExecuteCmd::run() {
     if (!shell)
         shell = "/bin/sh";
 
-    // remove last number of display and add screen num
-    displaystring.erase(displaystring.size()-1);
-    displaystring += intbuff;
-
     setsid();
-    putenv(const_cast<char *>(displaystring.c_str()));
     execl(shell, shell, "-c", m_cmd.c_str(), static_cast<void*>(NULL));
     exit(EXIT_SUCCESS);
 
     return pid; // compiler happy -> we are happy ;)
+#endif
 }
 
 FbTk::Command<void> *ExportCmd::parse(const string &command, const string &args,
@@ -200,34 +202,7 @@ ExportCmd::ExportCmd(const string& name, const string& value) :
 
 void ExportCmd::execute() {
 
-    // the setenv()-routine is not everywhere available and
-    // putenv() doesnt manage the strings in the environment
-    // and hence we have to do that on our own to avoid memleaking
-    static set<char*> stored;
-    char* newenv = new char[m_name.size() + m_value.size() + 2];
-    if (newenv) {
-
-        char* oldenv = getenv(m_name.c_str());
-
-        // oldenv points to the value .. we have to go back a bit
-        if (oldenv && stored.find(oldenv - (m_name.size() + 1)) != stored.end())
-            oldenv -= (m_name.size() + 1);
-        else
-            oldenv = NULL;
-
-        memset(newenv, 0, m_name.size() + m_value.size() + 2);
-        strcat(newenv, m_name.c_str());
-        strcat(newenv, "=");
-        strcat(newenv, m_value.c_str());
-
-        if (putenv(newenv) == 0) {
-            if (oldenv) {
-                stored.erase(oldenv);
-                delete[] oldenv;
-            }
-            stored.insert(newenv);
-        }
-    }
+    FbTk::App::instance()->setenv(m_name.c_str(), m_value.c_str());
 }
 
 REGISTER_COMMAND(exit, FbCommands::ExitFluxboxCmd, void);
@@ -256,10 +231,7 @@ RestartFluxboxCmd::RestartFluxboxCmd(const string &cmd):m_cmd(cmd){
 }
 
 void RestartFluxboxCmd::execute() {
-    if (m_cmd.empty())
-        Fluxbox::instance()->restart();
-    else
-        Fluxbox::instance()->restart(m_cmd.c_str());
+    Fluxbox::instance()->restart(m_cmd.c_str());
 }
 
 REGISTER_COMMAND(reconfigure, FbCommands::ReconfigureFluxboxCmd, void);
@@ -340,7 +312,8 @@ void ShowClientMenuCmd::execute() {
             m_list.push_back(static_cast<FluxboxWindow *>(*it));
     }
 
-    m_menu.reset(new ClientMenu(*screen, m_list, 0));
+    m_menu.reset(new ClientMenu(*screen, m_list,
+                                false)); // dont listen to list changes
     ::showMenu(*screen, *m_menu.get());
 }
 
@@ -366,7 +339,7 @@ void ShowCustomMenuCmd::execute() {
 
 void ShowCustomMenuCmd::reload() {
     m_menu->removeAll();
-    m_menu->setLabel("");
+    m_menu->setLabel(FbTk::BiDiString(""));
     MenuCreator::createFromFile(custom_menu_file, *m_menu.get(), m_menu->reloadHelper());
 }
 
@@ -465,20 +438,19 @@ void SetResourceValueDialogCmd::execute() {
 
     FbTk::FbWindow *win = new CommandDialog(*screen,  "Type resource name and the value", "SetResourceValue ");
     win->show();
-};
+}
 
 REGISTER_UNTRUSTED_COMMAND_WITH_ARGS(bindkey, FbCommands::BindKeyCmd, void);
 
 BindKeyCmd::BindKeyCmd(const string &keybind):m_keybind(keybind) { }
 
 void BindKeyCmd::execute() {
-    if (Fluxbox::instance()->keys() != 0) {
-        if (Fluxbox::instance()->keys()->addBinding(m_keybind)) {
-            ofstream ofile(Fluxbox::instance()->keys()->filename().c_str(), ios::app);
-            if (!ofile)
-                return;
-            ofile<<m_keybind<<endl;
-        }
+    Keys* keys = Fluxbox::instance()->keys();
+    if (keys && keys->addBinding(m_keybind)) {
+        ofstream ofile(keys->filename().c_str(), ios::app);
+        if (!ofile)
+            return;
+        ofile<<m_keybind<<endl;
     }
 }
 
@@ -539,7 +511,7 @@ void DeiconifyCmd::execute() {
 
     case ALL:
     case ALLWORKSPACE:
-        for(; it != itend; it++) {
+        for(; it != itend; ++it) {
             old_workspace_num= (*it)->workspaceNumber();
             if (m_mode == ALL || old_workspace_num == workspace_num ||
                 (*it)->isStuck()) {
@@ -553,7 +525,7 @@ void DeiconifyCmd::execute() {
     case LAST:
     case LASTWORKSPACE:
     default:
-        for (; it != itend; it++) {
+        for (; it != itend; ++it) {
             old_workspace_num= (*it)->workspaceNumber();
             if(m_mode == LAST || old_workspace_num == workspace_num ||
                (*it)->isStuck()) {
@@ -568,5 +540,74 @@ void DeiconifyCmd::execute() {
         break;
     };
 }
+
+
+REGISTER_COMMAND_WITH_ARGS(clientpatterntest, FbCommands::ClientPatternTestCmd, void);
+
+void ClientPatternTestCmd::execute() {
+
+    std::vector< const FluxboxWindow* > matches;
+    std::string                         result;
+    std::string                         pat;
+    int                                 opts;
+    ClientPattern*                      cp;
+    Display*                            dpy;
+    Atom                                atom_utf8;
+    Atom                                atom_fbcmd_result;
+    Fluxbox::ScreenList::const_iterator screen;
+    const Fluxbox::ScreenList           screens(Fluxbox::instance()->screenList());
+
+    dpy = Fluxbox::instance()->display();
+    atom_utf8 = XInternAtom(dpy, "UTF8_STRING", False);
+    atom_fbcmd_result = XInternAtom(dpy, "_FLUXBOX_ACTION_RESULT", False);
+
+    FocusableList::parseArgs(m_args, opts, pat);
+    cp = new ClientPattern(pat.c_str());
+
+    if (!cp->error()) {
+
+        const FocusableList*                        windows;
+        FocusControl::Focusables::const_iterator    wit;
+        FocusControl::Focusables::const_iterator    wit_end;
+
+        for (screen = screens.begin(); screen != screens.end(); screen++) {
+
+            windows = FocusableList::getListFromOptions(**screen, opts|FocusableList::LIST_GROUPS);
+            wit = windows->clientList().begin();
+            wit_end = windows->clientList().end();
+
+            for ( ; wit != wit_end; wit++) {
+                if (typeid(**wit) == typeid(FluxboxWindow) && cp->match(**wit)) {
+                    matches.push_back(static_cast<const FluxboxWindow*>(*wit));
+                }
+            }
+        }
+
+        if (!matches.empty()) {
+            std::vector< const FluxboxWindow* >::const_iterator win;
+            for (win = matches.begin(); win != matches.end(); win++) {
+                result += "0x";
+                result += FbTk::StringUtil::number2HexString((*win)->clientWindow());
+                result += "\t";
+                result += (*win)->title().logical();
+                result += "\n";
+            }
+        } else {
+            result += "0\n";
+        }
+    } else {
+        result = "-1\t";
+        result += FbTk::StringUtil::number2String(cp->error_col());
+        result += "\n";
+    }
+
+
+    // write result to _FLUXBOX_ACTION_RESULT property
+    for (screen = screens.begin(); screen != screens.end(); screen++) {
+        (*screen)->rootWindow().changeProperty(atom_fbcmd_result, atom_utf8, 8,
+            PropModeReplace, (unsigned char*)result.c_str(), result.size());
+    }
+}
+
 
 } // end namespace FbCommands

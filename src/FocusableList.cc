@@ -28,8 +28,10 @@
 #include "Window.hh"
 
 #include "FbTk/StringUtil.hh"
+#include "FbTk/MemFun.hh"
 
 #include <vector>
+#include <algorithm>
 
 #ifdef HAVE_CSTRING
   #include <cstring>
@@ -71,7 +73,7 @@ const FocusableList *FocusableList::getListFromOptions(BScreen &scr, int opts) {
             &scr.focusControl().focusedOrderList();
 }
 
-FocusableList::FocusableList(BScreen &scr, const string pat):
+FocusableList::FocusableList(BScreen &scr, const string & pat):
     m_pat(0), m_parent(0), m_screen(scr) {
 
     int options = 0;
@@ -84,7 +86,7 @@ FocusableList::FocusableList(BScreen &scr, const string pat):
 }
 
 FocusableList::FocusableList(BScreen &scr, const FocusableList &parent,
-                             const string pat):
+                             const string & pat):
     m_pat(new ClientPattern(pat.c_str())), m_parent(&parent), m_screen(scr) {
 
     init();
@@ -92,64 +94,58 @@ FocusableList::FocusableList(BScreen &scr, const FocusableList &parent,
 
 void FocusableList::init() {
     addMatching();
-    m_parent->attachChild(*this);
+
+    join(m_parent->addSig(), FbTk::MemFun(*this, &FocusableList::parentWindowAdded));
+    join(m_parent->orderSig(), FbTk::MemFun(*this, &FocusableList::parentOrderChanged));
+    join(m_parent->removeSig(), FbTk::MemFun(*this, &FocusableList::parentWindowRemoved));
+    join(m_parent->resetSig(), FbTk::MemFun(*this, &FocusableList::reset));
 
     // TODO: can't handle (head=[mouse]) yet
-    if (m_pat->dependsOnCurrentWorkspace())
-        m_screen.currentWorkspaceSig().attach(this);
-    if (m_pat->dependsOnFocusedWindow())
-        m_screen.focusedWindowSig().attach(this);
+    if (m_pat->dependsOnCurrentWorkspace()) {
+        join(m_screen.currentWorkspaceSig(),
+             FbTk::MemFun(*this, &FocusableList::workspaceChanged));
+    }
+    if (m_pat->dependsOnFocusedWindow()) {
+        join(m_screen.focusedWindowSig(),
+             FbTk::MemFun(*this, &FocusableList::focusedWindowChanged));
+    }
 }
 
-void FocusableList::update(FbTk::Subject *subj) {
-    if (subj == 0 || m_screen.isShuttingdown())
+void FocusableList::windowUpdated(FluxboxWindow &fbwin) {
+    if (m_screen.isShuttingdown())
         return;
 
-    if (typeid(*subj) == typeid(Focusable::FocusSubject)) {
-        Focusable::FocusSubject *fsubj =
-            static_cast<Focusable::FocusSubject *>(subj);
-        if (fsubj == &fsubj->win().dieSig())
-            remove(fsubj->win());
-        else if (fsubj == &fsubj->win().titleSig())
-            checkUpdate(fsubj->win());
+    // we only bind these for matching patterns, so skip finding out signal
+    if (m_parent->contains(fbwin))
+        checkUpdate(fbwin);
+    const std::list<WinClient *> &list = fbwin.clientList();
+    std::list<WinClient *>::const_iterator it = list.begin(), it_end = list.end();
+    for (; it != it_end; ++it) {
+        if (m_parent->contains(**it))
+            checkUpdate(**it);
     }
-    if (typeid(*subj) == typeid(FluxboxWindow::WinSubject)) {
-        FluxboxWindow::WinSubject *fsubj =
-            static_cast<FluxboxWindow::WinSubject *>(subj);
-        // we only bind these for matching patterns, so skip finding out signal
-        FluxboxWindow &fbwin = fsubj->win();
-        if (m_parent->contains(fbwin))
-            checkUpdate(fbwin);
-        std::list<WinClient *> list = fbwin.clientList();
-        std::list<WinClient *>::iterator it = list.begin(), it_end = list.end();
-        for (; it != it_end; ++it) {
-            if (m_parent->contains(**it))
-                checkUpdate(**it);
+}
+
+void FocusableList::parentOrderChanged(Focusable *win) {
+    if(!m_screen.isShuttingdown() && contains(*win)) {
+        if(insertFromParent(*win))
+            m_ordersig.emit(win);
+    }
+}
+
+void FocusableList::parentWindowAdded(Focusable *win) {
+    if(!m_screen.isShuttingdown()) {
+        attachSignals(*win);
+        if (m_pat->match(*win)) {
+            insertFromParent(*win);
+            m_addsig.emit(win);
         }
     }
-    if (typeid(*subj) == typeid(FocusableListSubject)) {
-        FocusableListSubject *fsubj =
-            static_cast<FocusableListSubject *>(subj);
-        if (subj == &m_parent->addSig()) {
-            attachSignals(*fsubj->win());
-            if (m_pat->match(*fsubj->win())) {
-                insertFromParent(*fsubj->win());
-                m_addsig.notify(fsubj->win());
-            }
-        } else if (subj == &m_parent->removeSig())
-            remove(*fsubj->win());
-        else if (subj == &m_parent->resetSig())
-            reset();
-        else if (subj == &m_parent->orderSig()) {
-            Focusable *win = fsubj->win();
-            if (!win || !contains(*win))
-                return;
-            if (insertFromParent(*win))
-                m_ordersig.notify(win);
-        }
-    } else if (subj == &m_screen.currentWorkspaceSig() ||
-               subj == &m_screen.focusedWindowSig())
-        reset();
+}
+
+void FocusableList::parentWindowRemoved(Focusable *win) {
+    if(!m_screen.isShuttingdown())
+        remove(*win);
 }
 
 void FocusableList::checkUpdate(Focusable &win) {
@@ -157,12 +153,12 @@ void FocusableList::checkUpdate(Focusable &win) {
         if (!m_pat->match(win)) {
             m_list.remove(&win);
             m_pat->removeMatch();
-            m_removesig.notify(&win);
+            m_removesig.emit(&win);
         }
     } else if (m_pat->match(win)) {
         insertFromParent(win);
         m_pat->addMatch();
-        m_addsig.notify(&win);
+        m_addsig.emit(&win);
     }
 }
 
@@ -173,7 +169,7 @@ bool FocusableList::insertFromParent(Focusable &win) {
     Focusables::iterator our_it = m_list.begin(), our_it_end = m_list.end();
     // walk through our list looking for corresponding entries in
     // parent's list, until we find the window that moved
-    for (; our_it != our_it_end && p_it != p_it_end; p_it++) {
+    for (; our_it != our_it_end && p_it != p_it_end; ++p_it) {
         if (*p_it == &win) {
             if (*our_it == &win) // win didn't move in our list
                 return false;
@@ -207,13 +203,13 @@ void FocusableList::addMatching() {
 void FocusableList::pushFront(Focusable &win) {
     m_list.push_front(&win);
     attachSignals(win);
-    m_addsig.notify(&win);
+    m_addsig.emit(&win);
 }
 
 void FocusableList::pushBack(Focusable &win) {
     m_list.push_back(&win);
     attachSignals(win);
-    m_addsig.notify(&win);
+    m_addsig.emit(&win);
 }
 
 void FocusableList::moveToFront(Focusable &win) {
@@ -223,7 +219,7 @@ void FocusableList::moveToFront(Focusable &win) {
 
     m_list.remove(&win);
     m_list.push_front(&win);
-    m_ordersig.notify(&win);
+    m_ordersig.emit(&win);
 }
 
 void FocusableList::moveToBack(Focusable &win) {
@@ -233,59 +229,55 @@ void FocusableList::moveToBack(Focusable &win) {
 
     m_list.remove(&win);
     m_list.push_back(&win);
-    m_ordersig.notify(&win);
+    m_ordersig.emit(&win);
 }
 
 void FocusableList::remove(Focusable &win) {
     // if the window isn't already in this list, we could send a bad signal
     bool contained = contains(win);
 
-    detachSignals(win);
-    if (!contained)
+    m_signal_map.erase(&win);
+    if (!contained) {
         return;
+    }
     m_list.remove(&win);
-    m_removesig.notify(&win);
+    m_removesig.emit(&win);
 }
+
+void FocusableList::updateTitle(Focusable& win) {
+    checkUpdate(win);
+}
+#include "Debug.hh"
 
 void FocusableList::attachSignals(Focusable &win) {
-    win.dieSig().attach(this);
-    if (m_parent) {
-        // attach various signals for matching
-        win.titleSig().attach(this);
-        FluxboxWindow *fbwin = win.fbwindow();
-        if (!fbwin)
-            return;
-        fbwin->workspaceSig().attach(this);
-        fbwin->stateSig().attach(this);
-        fbwin->layerSig().attach(this);
-        // TODO: can't watch (head=...) yet
-    }
-}
+    if (m_parent == NULL)
+        return;
 
-void FocusableList::detachSignals(Focusable &win) {
-    win.dieSig().detach(this);
-    if (m_parent) {
-        // detach various signals for matching
-        win.titleSig().detach(this);
-        FluxboxWindow *fbwin = win.fbwindow();
-        if (!fbwin)
-            return;
-        fbwin->workspaceSig().detach(this);
-        fbwin->stateSig().detach(this);
-        fbwin->layerSig().detach(this);
-        // TODO: can't watch (head=...) yet
+    FluxboxWindow *fbwin = win.fbwindow();
+
+    // attach various signals for matching
+    FbTk::RefCount<FbTk::SignalTracker> &tracker = m_signal_map[&win];
+    if (! tracker) {
+        // we have not attached to this window yet
+        tracker.reset(new SignalTracker);
+        tracker->join(win.titleSig(), MemFunSelectArg1(*this, &FocusableList::updateTitle));
+        tracker->join(win.dieSig(), MemFun(*this, &FocusableList::remove));
+        if(fbwin) {
+            tracker->join(fbwin->workspaceSig(), MemFun(*this, &FocusableList::windowUpdated));
+            tracker->join(fbwin->stateSig(), MemFun(*this, &FocusableList::windowUpdated));
+            tracker->join(fbwin->layerSig(), MemFun(*this, &FocusableList::windowUpdated));
+            // TODO: can't watch (head=...) yet
+        }
     }
 }
 
 void FocusableList::reset() {
-    while (!m_list.empty()) {
-        detachSignals(*m_list.back());
-        m_list.pop_back();
-    }
+    m_signal_map.clear();
+    m_list.clear();
     m_pat->resetMatches();
     if (m_parent)
         addMatching();
-    m_resetsig.notify(0);
+    m_resetsig.emit();
 }
 
 bool FocusableList::contains(const Focusable &win) const {
@@ -303,9 +295,12 @@ Focusable *FocusableList::find(const ClientPattern &pat) const {
     return 0;
 }
 
-void FocusableList::attachChild(FocusableList &child) const {
-    m_addsig.attach(&child);
-    m_removesig.attach(&child);
-    m_resetsig.attach(&child);
-    m_ordersig.attach(&child);
+void FocusableList::workspaceChanged(BScreen &screen) {
+    reset();
+}
+
+void FocusableList::focusedWindowChanged(BScreen &screen,
+                                         FluxboxWindow *focused_win,
+                                         WinClient *client) {
+    reset();
 }

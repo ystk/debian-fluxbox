@@ -23,8 +23,7 @@
 #define FBTK_TEXTBUTTON_HH
 
 #include "Button.hh"
-
-#include <string>
+#include "FbString.hh"
 
 namespace FbTk {
 
@@ -34,11 +33,11 @@ class Font;
 class TextButton: public FbTk::Button, FbTk::FbWindowRenderer {
 public:
     TextButton(const FbTk::FbWindow &parent, 
-               FbTk::Font &font, const std::string &text);
+               FbTk::Font &font, const FbTk::BiDiString &text);
 
     void setJustify(FbTk::Justify just);
     bool setOrientation(FbTk::Orientation orient);
-    void setText(const std::string &text);
+    void setText(const FbTk::BiDiString &text);
     void setFont(FbTk::Font &font);
     void setTextPadding(unsigned int padding);
     void setTextPaddingLeft(unsigned int leftpadding);
@@ -57,16 +56,16 @@ public:
 
     void exposeEvent(XExposeEvent &event);
 
-    void renderForeground(FbDrawable &drawable);
+    //void renderForeground(FbDrawable &drawable);
+    void renderForeground(FbWindow &win, FbDrawable &drawable);
 
     FbTk::Justify justify() const { return m_justify; }
-    const std::string &text() const { return m_text; }
+    const BiDiString &text() const { return m_text; }
     FbTk::Font &font() const { return *m_font; }
     FbTk::Orientation orientation() const { return m_orientation; }
     unsigned int textWidth() const;
     int bevel() const { return m_bevel; }
 
-    void renderForeground(FbWindow &win, FbDrawable &drawable);
 
 protected:
     virtual void drawText(int x_offset, int y_offset, FbDrawable *drawable_override);
@@ -75,7 +74,7 @@ protected:
 
 private:
     FbTk::Font *m_font;
-    std::string m_text;
+    BiDiString m_text;
     FbTk::Justify m_justify;
     FbTk::Orientation m_orientation;
 

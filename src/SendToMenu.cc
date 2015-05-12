@@ -30,7 +30,7 @@
 
 #include "FbTk/MultiButtonMenuItem.hh"
 #include "FbTk/Command.hh"
-#include "FbTk/SimpleObserver.hh"
+#include "FbTk/MemFun.hh"
 
 class SendToCmd: public FbTk::Command<void> {
 public:
@@ -49,15 +49,22 @@ private:
 SendToMenu::SendToMenu(BScreen &screen):
     FbMenu(screen.menuTheme(),
            screen.imageControl(), 
-           *screen.layerManager().getLayer(Layer::MENU)) {
+           *screen.layerManager().getLayer(ResourceLayer::MENU)) {
     // listen to:
     // workspace count signal
     // workspace names signal
     // current workspace signal
-    m_rebuildObs = makeObserver(*this, &SendToMenu::rebuildMenu);
-    screen.workspaceCountSig().attach(m_rebuildObs);
-    screen.workspaceNamesSig().attach(m_rebuildObs);
-    screen.currentWorkspaceSig().attach(m_rebuildObs);
+
+    join(screen.workspaceNamesSig(),
+         FbTk::MemFun(*this, &SendToMenu::rebuildMenuForScreen));
+
+    join(screen.currentWorkspaceSig(),
+         FbTk::MemFun(*this, &SendToMenu::rebuildMenuForScreen));
+
+    // setup new signal system
+    join(screen.workspaceCountSig(),
+         FbTk::MemFun(*this, &SendToMenu::rebuildMenuForScreen));
+
     // no title for this menu, it should be a submenu in the window menu.
     disableTitle();
     // setup menu items
@@ -65,7 +72,7 @@ SendToMenu::SendToMenu(BScreen &screen):
 }
 
 SendToMenu::~SendToMenu() {
-    delete m_rebuildObs;
+
 }
 
 void SendToMenu::rebuildMenu() {

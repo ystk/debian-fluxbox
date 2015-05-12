@@ -23,7 +23,7 @@
 #ifndef TOOLBARITEM_HH
 #define TOOLBARITEM_HH
 
-#include "FbTk/Subject.hh"
+#include "FbTk/Signal.hh"
 #include "FbTk/Orientation.hh"
 
 /// An item in the toolbar that has either fixed or relative size to the toolbar
@@ -54,7 +54,7 @@ public:
 
     // Tools should NOT listen to theme changes - they'll get notified by
     // the toolbar instead. Otherwise there are ordering problems.
-    virtual void renderTheme(unsigned char alpha) = 0;
+    virtual void renderTheme(int alpha) = 0;
 
     // insist implemented, even if blank
     virtual void parentMoved() = 0; // called when moved from hiding
@@ -62,7 +62,7 @@ public:
     // just update theme items that affect the size
     virtual void updateSizing() = 0;
 
-    FbTk::Subject &resizeSig() { return m_resize_sig; }
+    FbTk::Signal<> &resizeSig() { return m_resize_sig; }
 
     void setType(Type type) { m_type = type; }
     Type type() const { return m_type; }
@@ -70,14 +70,12 @@ public:
     FbTk::Orientation orientation() const { return m_orientation; }
     virtual void setOrientation(FbTk::Orientation orient) { m_orientation = orient; }
 
-    class ToolbarItemSubject : public FbTk::Subject {};
-
 private:
     Type m_type;
 
     FbTk::Orientation m_orientation;
 
-    ToolbarItemSubject m_resize_sig;
+    FbTk::Signal<> m_resize_sig;
 };
 
 #endif // TOOLBARITEM_HH

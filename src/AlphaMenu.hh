@@ -28,14 +28,21 @@
 #include "WindowMenuAccessor.hh"
 #include "FbTk/MenuItem.hh"
 
+namespace FbTk {
+    class IntMenuItem;
+}
+
 class AlphaMenu : public ToggleMenu {
 public:
     AlphaMenu(FbTk::ThemeProxy<FbTk::MenuTheme> &tm,
-              FbTk::ImageControl &imgctrl, FbTk::XLayer &layer);
+              FbTk::ImageControl &imgctrl, FbTk::Layer &layer);
 
     // we override these to update the menu when the active window changes
     void move(int x, int y);
     void show();
+private:
+    FbTk::IntMenuItem* m_focused_alpha_item;
+    FbTk::IntMenuItem* m_unfocused_alpha_item;
 };
 
 class AlphaMenuSelectItem : public FbTk::MenuItem {

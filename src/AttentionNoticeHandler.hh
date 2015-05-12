@@ -22,9 +22,9 @@
 #ifndef ATTENTIONNOTICEHANDLER_HH
 #define ATTENTIONNOTICEHANDLER_HH
 
-#include "FbTk/Observer.hh"
-
 #include <map>
+
+#include "FbTk/Signal.hh"
 
 class Focusable;
 
@@ -36,7 +36,7 @@ class Timer;
  * Makes the title and iconbutton flash when the window 
  * demands attention.
  */
-class AttentionNoticeHandler: public FbTk::Observer {
+class AttentionNoticeHandler: private FbTk::SignalTracker {
 public:
     ~AttentionNoticeHandler();
 
@@ -44,12 +44,18 @@ public:
     /// Adds a client that requires attention,
     /// will fail if the client is already active
     void addAttention(Focusable &client); 
-    /// removes the client from the attention map
-    void update(FbTk::Subject *subj);
 
     bool isDemandingAttention(const Focusable &client);
-    
+
+    /// Called when window focus changes.
+    void windowFocusChanged(Focusable& win);
+    /// Remove window from attentionHandler.
+    void removeWindow(Focusable& win);
+
 private:
+    /// updates the windows state in this instance.
+    void updateWindow(Focusable& win, bool died);
+
     NoticeMap m_attentions;
 };
 

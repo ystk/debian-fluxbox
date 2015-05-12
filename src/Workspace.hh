@@ -1,5 +1,5 @@
 // Workspace.hh for Fluxbox
-// Copyright (c) 2002 - 2006 Henrik Kinnunen (fluxgen at fluxbox dot org)
+// Copyright (c) 2002 - 2008 Henrik Kinnunen (fluxgen at fluxbox dot org)
 //
 // Workspace.hh for Blackbox - an X11 Window manager
 // Copyright (c) 1997 - 2000 Brad Hughes (bhughes@tcac.net)
@@ -28,6 +28,7 @@
 #include "ClientMenu.hh"
 
 #include "FbTk/NotCopyable.hh"
+#include "FbTk/Signal.hh"
 
 #include <string>
 #include <list>
@@ -47,7 +48,7 @@ public:
     ~Workspace();
 
     /// Set workspace name
-    void setName(const std::string &name);
+    void setName(const FbTk::FbString& name);
     /// Deiconify all windows on this workspace
     void showAll();
     void hideAll(bool interrupt_moving);
@@ -67,7 +68,7 @@ public:
     FbTk::Menu &menu() { return m_clientmenu; }
     const FbTk::Menu &menu() const { return m_clientmenu; }
     ///    name of this workspace
-    const std::string &name() const { return m_name; }
+    const FbTk::FbString &name() const { return m_name; }
     /**
        @return the number of this workspace, note: obsolete, should be in BScreen
     */
@@ -84,10 +85,10 @@ private:
     BScreen &m_screen;
 
     Windows m_windowlist;
-    FbTk::Subject m_clientlist_sig;
+    FbTk::Signal<> m_clientlist_sig;
     ClientMenu m_clientmenu;
 
-    std::string m_name;  ///< name of this workspace
+    FbTk::FbString m_name;  ///< name of this workspace
     unsigned int m_id;    ///< id, obsolete, this should be in BScreen
 
 };

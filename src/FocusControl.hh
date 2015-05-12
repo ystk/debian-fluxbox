@@ -42,8 +42,9 @@ public:
     typedef std::list<Focusable *> Focusables;
     /// main focus model
     enum FocusModel { 
-        MOUSEFOCUS = 0, ///< focus follows mouse
-        CLICKFOCUS      ///< focus on click
+        MOUSEFOCUS = 0,  ///< focus follows mouse, but only when the mouse is moving
+        CLICKFOCUS,      ///< focus on click
+        STRICTMOUSEFOCUS ///< focus always follows mouse, even when stationary
     };
     /// focus model for tabs
     enum TabFocusModel { 
@@ -90,9 +91,24 @@ public:
      */
     void dirFocus(FluxboxWindow &win, FocusDir dir);
     /// @return true if focus mode is mouse focus
-    bool isMouseFocus() const { return focusModel() == MOUSEFOCUS; }
+    bool isMouseFocus() const { return focusModel() != CLICKFOCUS; }
     /// @return true if tab focus mode is mouse tab focus
     bool isMouseTabFocus() const { return tabFocusModel() == MOUSETABFOCUS; }
+
+    /// Set the "ignore" pointer location to the current pointer location
+    /// @param force If true, ignore even in StrictMouseFocus mode
+    void ignoreAtPointer(bool force = false);
+    /// Set the "ignore" pointer location to the given coordinates
+    /// @param x Current X position of the pointer
+    /// @param y Current Y position of the pointer
+    /// @param force If true, ignore even in StrictMouseFocus mode
+    void ignoreAt(int x, int y, bool force = false);
+    /// unset the "ignore" pointer location
+    void ignoreCancel();
+    /// @return true if events at the given X/Y coordinate should be ignored
+    /// (ie, they were previously cached via one of the ignoreAt calls)
+    bool isIgnored(int x, int y);
+
     /// @return true if cycling is in progress
     bool isCycling() const { return m_cycling_list != 0; }
     /// Appends a client to the front of the focus list
@@ -108,6 +124,10 @@ public:
     TabFocusModel tabFocusModel() const { return *m_tab_focus_model; }
     /// @return true if newly created windows are focused
     bool focusNew() const { return *m_focus_new; }
+#ifdef XINERAMA
+    /// @return true if focus reverts to same head only
+    bool focusSameHead() const { return *m_focus_same_head; }
+#endif // XINERAMA
 
     /// @return last focused client in a specific workspace, or NULL.
     Focusable *lastFocusedWindow(int workspace);
@@ -145,6 +165,9 @@ private:
     FbTk::Resource<FocusModel> m_focus_model;    
     FbTk::Resource<TabFocusModel> m_tab_focus_model;
     FbTk::Resource<bool> m_focus_new;
+#ifdef XINERAMA
+    FbTk::Resource<bool> m_focus_same_head;
+#endif // XINERAMA
 
     // This list keeps the order of window focusing for this screen
     // Screen global so it works for sticky windows too.
@@ -157,6 +180,7 @@ private:
     const FocusableList *m_cycling_list;
     Focusable *m_was_iconic;
     WinClient *m_cycling_last;
+    int m_ignore_mouse_x, m_ignore_mouse_y;
 
     static WinClient *s_focused_window;
     static FluxboxWindow *s_focused_fbwindow;

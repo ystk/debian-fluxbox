@@ -28,6 +28,7 @@
 
 #include "FbTk/App.hh"
 #include "FbTk/Font.hh"
+#include "FbTk/Image.hh"
 #include "FbTk/ImageControl.hh"
 #include "FbTk/Resource.hh"
 #include "FbTk/FileUtil.hh"
@@ -39,15 +40,16 @@
 #include <iostream>
 
 #include <sys/types.h>
+#ifdef HAVE_SYS_WAIT_H
 #include <sys/wait.h>
+#endif
+
 #ifdef HAVE_CSTRING
   #include <cstring>
 #else
   #include <string.h>
 #endif
 
-using std::cerr;
-using std::endl;
 using std::string;
 
 class BackgroundItem: public FbTk::ThemeItem<FbTk::Texture> {
@@ -157,7 +159,6 @@ RootTheme::RootTheme(FbTk::ImageControl &image_control):
     m_opgc.setForeground(WhitePixel(disp, screenNum())^BlackPixel(disp, screenNum()));
     m_opgc.setFunction(GXxor);
     m_opgc.setSubwindowMode(IncludeInferiors);
-    m_opgc.setLineAttributes(1, LineSolid, CapNotLast, JoinMiter);
     FbTk::ThemeManager::instance().loadTheme(*this);
 }
 
@@ -181,7 +182,7 @@ void RootTheme::reconfigTheme() {
     if (!m_background->loaded())
         return;
 
-    if (!m_background->changed())
+    if (!m_first && !m_background->changed())
         return;
 
     //
@@ -198,14 +199,19 @@ void RootTheme::reconfigTheme() {
     // if background argument is a file then
     // parse image options and call image setting
     // command specified in the resources
+    std::string img_path = FbTk::Image::locateFile(filename);
     filename = FbTk::StringUtil::expandFilename(filename);
     std::string cmd = realProgramName("fbsetbg") + (m_first ? " -z " : " -Z ");
 
+    // user explicitly requests NO background be set at all
+    if (strstr(m_background->options().c_str(), "unset") != 0) {
+        return;
+    }
     // style doesn't wish to change the background
     if (strstr(m_background->options().c_str(), "none") != 0) {
         if (!m_first)
             return;
-    } else if (FbTk::FileUtil::isRegularFile(filename.c_str())) {
+    } else if (!img_path.empty()) {
         // parse options
         if (strstr(m_background->options().c_str(), "tiled") != 0)
             cmd += "-t ";
@@ -216,7 +222,7 @@ void RootTheme::reconfigTheme() {
         else
             cmd += "-f ";
 
-        cmd += filename;
+        cmd += img_path;
     } else if (FbTk::FileUtil::isDirectory(filename.c_str()) &&
                strstr(m_background->options().c_str(), "random") != 0) {
         cmd += "-r " + filename;

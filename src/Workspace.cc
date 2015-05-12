@@ -1,5 +1,5 @@
 // Workspace.cc for Fluxbox
-// Copyright (c) 2001 - 2006 Henrik Kinnunen (fluxgen at fluxbox dot org)
+// Copyright (c) 2001 - 2008 Henrik Kinnunen (fluxgen at fluxbox dot org)
 //
 // Workspace.cc for Blackbox - an X11 Window manager
 // Copyright (c) 1997 - 2000 Brad Hughes (bhughes at tcac.net)
@@ -34,6 +34,7 @@
 #include "FbTk/I18n.hh"
 #include "FbTk/StringUtil.hh"
 #include "FbTk/FbString.hh"
+#include "FbTk/MemFun.hh"
 
 // use GNU extensions
 #ifndef  _GNU_SOURCE
@@ -62,20 +63,18 @@
 
 using std::string;
 
-#ifdef DEBUG
-#include <iostream>
-using std::cerr;
-using std::endl;
-#endif // DEBUG
-
 Workspace::Workspace(BScreen &scrn, const string &name, unsigned int id):
     m_screen(scrn),
-    m_clientmenu(scrn, m_windowlist, &m_clientlist_sig),
+    m_clientmenu(scrn, m_windowlist, false),
     m_name(name),
     m_id(id) {
 
+    m_clientlist_sig.connect(FbTk::MemFun(m_clientmenu,
+                                          &ClientMenu::refreshMenu));
+
     menu().setInternalMenu();
     setName(name);
+
 
 }
 
@@ -91,7 +90,7 @@ void Workspace::addWindow(FluxboxWindow &w) {
     w.setWorkspace(m_id);
 
     m_windowlist.push_back(&w);
-    m_clientlist_sig.notify();
+    m_clientlist_sig.emit();
 
 }
 
@@ -104,11 +103,16 @@ int Workspace::removeWindow(FluxboxWindow *w, bool still_alive) {
     if (w == 0)
         return -1;
 
-    if (w->isFocused() && still_alive)
+    // if w is focused and alive, remove the focus ... except if it
+    // is a transient window. removing the focus from such a window
+    // leads in a wild race between BScreen::reassociateWindow(),
+    // BScreen::changeWorkspaceID(), FluxboxWindow::focus() etc. which
+    // finally leads to crash.
+    if (w->isFocused() && !w->isTransient() && still_alive)
         FocusControl::unfocusWindow(w->winClient(), true, true);
 
     m_windowlist.remove(w);
-    m_clientlist_sig.notify();
+    m_clientlist_sig.emit();
 
     return m_windowlist.size();
 }
@@ -172,7 +176,7 @@ void Workspace::setName(const string &name) {
 
     screen().updateWorkspaceName(m_id);
 
-    menu().setLabel(m_name);
+    menu().setLabel(FbTk::BiDiString(m_name));
     menu().updateMenu();
 }
 
@@ -190,5 +194,5 @@ void Workspace::shutdown() {
 }
 
 void Workspace::updateClientmenu() {
-    m_clientlist_sig.notify();
+    m_clientlist_sig.emit();
 }

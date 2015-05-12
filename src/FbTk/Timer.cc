@@ -1,5 +1,5 @@
 // Timer.cc for FbTk - Fluxbox Toolkit
-// Copyright (c) 2003 - 2006 Henrik Kinnunen (fluxgen at fluxbox dot org)
+// Copyright (c) 2003 - 2012 Henrik Kinnunen (fluxgen at fluxbox dot org)
 //
 // Timer.cc for Blackbox - An X11 Window Manager
 // Copyright (c) 1997 - 2000 Brad Hughes (bhughes at tcac.net)
@@ -32,220 +32,203 @@
 #define _GNU_SOURCE
 #endif // _GNU_SOURCE
 
-#ifdef	HAVE_CONFIG_H
-#include "config.h"
-#endif // HAVE_CONFIG_H
-
-#include <sys/time.h>
-#include <sys/types.h>
-#include <unistd.h>
 #ifdef HAVE_CASSERT
   #include <cassert>
 #else
   #include <assert.h>
 #endif
 
-namespace FbTk {
+// sys/select.h on solaris wants to use memset()
+#ifdef HAVE_CSTRING
+#  include <cstring>
+#else
+#  include <string.h>
+#endif
 
-Timer::TimerList Timer::m_timerlist;
+#ifdef HAVE_SYS_SELECT_H
+#  include <sys/select.h>
+#elif defined(_WIN32)
+#  include <winsock.h>
+#endif
 
-Timer::Timer():m_timing(false), m_once(false), m_interval(0) {
+#include <cstdio>
+#include <vector>
+#include <set>
+
+namespace {
+
+struct TimerCompare {
+    // stable sort order and allows multiple timers to have
+    // the same end-time
+    bool operator() (const FbTk::Timer* a, const FbTk::Timer* b) const {
+        uint64_t ae = a->getEndTime();
+        uint64_t be = b->getEndTime();
+        return (ae < be) || (ae == be && a < b);
+    }
+};
+typedef std::set<FbTk::Timer*, TimerCompare> TimerList;
+TimerList s_timerlist;
 
 }
 
-Timer::Timer(RefCount<Command<void> > &handler):
-    m_handler(handler),
-    m_timing(false),
+
+namespace FbTk {
+
+Timer::Timer() :
     m_once(false),
-    m_interval(0) {
+    m_interval(0),
+    m_start(0),
+    m_timeout(0) {
+
+}
+
+Timer::Timer(const RefCount<Slot<void> > &handler):
+    m_handler(handler),
+    m_once(false),
+    m_interval(0),
+    m_start(0),
+    m_timeout(0) {
 }
 
 
 Timer::~Timer() {
-    if (isTiming()) stop();
+    stop();
 }
 
 
-void Timer::setTimeout(time_t t) {
-    m_timeout.tv_sec = t / 1000;
-    m_timeout.tv_usec = t;
-    m_timeout.tv_usec -= (m_timeout.tv_sec * 1000);
-    m_timeout.tv_usec *= 1000;
+void Timer::setTimeout(uint64_t timeout) {
+
+    bool was_timing = isTiming();
+    if (was_timing) {
+        stop();
+    }
+    m_timeout = timeout;
+
+    if (was_timing) {
+        start();
+    }
 }
 
-
-void Timer::setTimeout(const timeval &t) {
-    m_timeout.tv_sec = t.tv_sec;
-    m_timeout.tv_usec = t.tv_usec;
-}
-
-void Timer::setCommand(RefCount<Command<void> > &cmd) {
+void Timer::setCommand(const RefCount<Slot<void> > &cmd) {
     m_handler = cmd;
 }
 
 void Timer::start() {
-    gettimeofday(&m_start, 0);
 
     // only add Timers that actually DO something
-    if ((! m_timing || m_interval != 0) && *m_handler) {
-        m_timing = true;
-        addTimer(this); //add us to the list
-    }        
+    if ( ( ! isTiming() || m_interval > 0 ) && m_handler) {
+
+        // in case start() gets triggered on a started 
+        // timer with 'm_interval != 0' we have to remove
+        // it from s_timerlist before restarting it
+        stop();
+
+        m_start = FbTk::FbTime::mono();
+
+        // interval timers have their timeout change every 
+        // time they are started!
+        if (m_interval != 0) {
+            m_timeout = m_interval * FbTk::FbTime::IN_SECONDS;
+        }
+        s_timerlist.insert(this);
+    }
 }
 
 
 void Timer::stop() {
-    m_timing = false;
-    removeTimer(this); //remove us from the list
+    s_timerlist.erase(this);
 }
 
-void Timer::makeEndTime(timeval &tm) const {
-    tm.tv_sec = m_start.tv_sec + m_timeout.tv_sec;
-    tm.tv_usec = m_start.tv_usec + m_timeout.tv_usec;
-    if (tm.tv_usec >= 1000000) {
-        tm.tv_usec -= 1000000;
-        tm.tv_sec++;
-    }
+uint64_t Timer::getEndTime() const {
+    return m_start + m_timeout;
 }
 
+int Timer::isTiming() const {
+    return s_timerlist.find(const_cast<FbTk::Timer*>(this)) != s_timerlist.end();
+}
 
 void Timer::fireTimeout() {
-    if (*m_handler)
-        m_handler->execute();
+    if (m_handler)
+        (*m_handler)();
 }
 
+
 void Timer::updateTimers(int fd) {
-    fd_set rfds;
-    timeval now, tm, *timeout = 0;
+
+    fd_set              rfds;
+    timeval*            tout;
+    timeval             tm;
+    TimerList::iterator t;
+    bool                overdue = false;
+    uint64_t            now;
+
 
     FD_ZERO(&rfds);
     FD_SET(fd, &rfds);
+    tout = NULL;
 
-    bool overdue = false;
-  
-    if (!m_timerlist.empty()) {
-        gettimeofday(&now, 0);
+    // search for overdue timers
+    if (!s_timerlist.empty()) {
 
-        Timer *timer = m_timerlist.front();
+        Timer*      timer = *s_timerlist.begin();
+        uint64_t    end_time = timer->getEndTime();
 
-        timer->makeEndTime(tm);
-
-        tm.tv_sec -= now.tv_sec;
-        tm.tv_usec -= now.tv_usec;
-
-        while (tm.tv_usec < 0) {
-            if (tm.tv_sec > 0) {
-                tm.tv_sec--;
-                tm.tv_usec += 1000000;
-            } else {
-                overdue = true;
-                tm.tv_usec = 0;
-                break;
-            }
-        }
-
-        if (tm.tv_sec < 0) { // usec zero-ed above if negative
-            tm.tv_sec = 0;
-            tm.tv_usec = 0;
+        now = FbTime::mono();
+        if (end_time <= now) {
             overdue = true;
-        }
-
-        timeout = &tm;
-    }
-
-    if (!overdue && select(fd + 1, &rfds, 0, 0, timeout) != 0)
-        // didn't time out! x events pending
-        return;
-
-    TimerList::iterator it;
-
-    // check for timer timeout
-    gettimeofday(&now, 0);
-
-    // someone set the date of the machine BACK
-    // so we have to adjust the start_time
-    static time_t last_time = 0;
-    if (now.tv_sec < last_time) {
-    
-        time_t delta = last_time - now.tv_sec;
-
-        for (it = m_timerlist.begin(); it != m_timerlist.end(); it++) {
-            (*it)->m_start.tv_sec -= delta;
-        }
-    }
-    last_time = now.tv_sec;
-
-
-    //must check end ...the timer might remove
-    //it self from the list (should be fixed in the future)
-    for(it = m_timerlist.begin(); it != m_timerlist.end(); ) {
-        //This is to make sure we don't get an invalid iterator
-        //when we do fireTimeout
-        Timer &t = *(*it);
-
-        t.makeEndTime(tm);
-
-        if (((now.tv_sec < tm.tv_sec) ||
-             (now.tv_sec == tm.tv_sec && now.tv_usec < tm.tv_usec)))
-            break;
-
-        t.fireTimeout();
-        // restart the current timer so that the start time is updated
-        if (! t.doOnce()) {
-            // must erase so that it's put into the right place in the list
-            it = m_timerlist.erase(it);
-            t.m_timing = false;
-            t.start();
         } else {
-            // Since the default stop behaviour results in the timer
-            // being removed, we must remove it here, so that the iterator
-            // lives well. Another option would be to add it to another
-            // list, and then just go through that list and stop them all.
-            it = m_timerlist.erase(it);
-            t.stop();
+            uint64_t    diff = (end_time - now);
+            tm.tv_sec = diff / FbTime::IN_SECONDS;
+            tm.tv_usec = diff % FbTime::IN_SECONDS;
+            tout = &tm;
         }
     }
 
-}
-
-void Timer::addTimer(Timer *timer) {
-    assert(timer);
-    int interval = timer->getInterval();
-    // interval timers have their timeout change every time they are started!
-    timeval tm;
-    if (interval != 0) {
-        tm.tv_sec = timer->getStartTime().tv_sec;
-        tm.tv_usec = timer->getStartTime().tv_usec;
-
-        // now convert to interval
-        tm.tv_sec = interval - (tm.tv_sec % interval) - 1;
-        tm.tv_usec = 1000000 - tm.tv_usec;
-        if (tm.tv_usec == 1000000) {
-            tm.tv_usec = 0;
-            tm.tv_sec += 1;
-        }
-        timer->setTimeout(tm);
+    // if not overdue, wait for the next xevent via the blocking
+    // select(), so OS sends fluxbox to sleep. the select() will
+    // time out when the next timer has to be handled
+    if (!overdue && select(fd + 1, &rfds, 0, 0, tout) != 0) {
+        // didn't time out! x events are pending
+        return;
     }
 
-    // set timeval to the time-of-trigger
-    timer->makeEndTime(tm);
+    // stoping / restarting the timers modifies the list in an upredictable
+    // way. to avoid problems (infinite loops etc) we copy the current overdue
+    // timers from the gloabl (and ordered) list of timers and work on it.
 
-    // timer list is sorted by trigger time (i.e. start plus timeout)
-    TimerList::iterator it = m_timerlist.begin();
-    TimerList::iterator it_end = m_timerlist.end();
-    for (; it != it_end; ++it) {
-        timeval trig;
-        (*it)->makeEndTime(trig);
+    static std::vector<FbTk::Timer*> timeouts;
 
-        if ((trig.tv_sec > tm.tv_sec) ||
-            (trig.tv_sec == tm.tv_sec &&
-             trig.tv_usec >= tm.tv_usec)) {
+    now = FbTime::mono();
+    for (t = s_timerlist.begin(); t != s_timerlist.end(); ++t ) {
+        if (now < (*t)->getEndTime()) {
             break;
         }
+        timeouts.push_back(*t);
     }
-    m_timerlist.insert(it, timer); 
 
+    size_t i;
+    const size_t ts = timeouts.size();
+    for (i = 0; i < ts; ++i) {
+
+        FbTk::Timer& timer = *timeouts[i];
+
+        // first we stop the timer to remove it
+        // from s_timerlist
+        timer.stop();
+
+        // then we call the handler which might (re)start 't'
+        // on it's own
+        timer.fireTimeout();
+
+        // restart 't' if needed
+        if (!timer.doOnce() && !timer.isTiming()) {
+            timer.start();
+        }
+    }
+
+    timeouts.clear();
 }
+
 
 Command<void> *DelayedCmd::parse(const std::string &command,
                            const std::string &args, bool trusted) {
@@ -257,23 +240,24 @@ Command<void> *DelayedCmd::parse(const std::string &command,
         return 0;
 
     RefCount<Command<void> > cmd(CommandParser<void>::instance().parse(cmd_str, trusted));
-    if (*cmd == 0)
+    if (cmd == 0)
         return 0;
 
-    int delay = 200000;
-    StringUtil::fromString<int>(args.c_str() + err, delay);
+    uint64_t delay = 200;
+    StringUtil::fromString<uint64_t>(args.c_str() + err, delay);
 
     return new DelayedCmd(cmd, delay);
 }
 
 REGISTER_COMMAND_PARSER(delay, DelayedCmd::parse, void);
 
-DelayedCmd::DelayedCmd(RefCount<Command<void> > &cmd, unsigned int timeout) {
-    timeval to; // defaults to 200ms
-    to.tv_sec = timeout/1000000;
-    to.tv_usec = timeout % 1000000;
-    m_timer.setTimeout(to);
+DelayedCmd::DelayedCmd(const RefCount<Slot<void> > &cmd, uint64_t timeout) {
+    initTimer(timeout);
     m_timer.setCommand(cmd);
+}
+
+void DelayedCmd::initTimer(uint64_t timeout) {
+    m_timer.setTimeout(timeout);
     m_timer.fireOnce(true);
 }
 
@@ -283,9 +267,4 @@ void DelayedCmd::execute() {
     m_timer.start();
 }
 
-void Timer::removeTimer(Timer *timer) {
-    assert(timer);
-    m_timerlist.remove(timer);
-}
-	
 } // end namespace FbTk

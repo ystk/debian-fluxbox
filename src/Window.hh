@@ -25,19 +25,19 @@
 #ifndef WINDOW_HH
 #define WINDOW_HH
 
-#include "FbTk/DefaultValue.hh"
-#include "FbTk/Timer.hh"
-#include "FbTk/Subject.hh"
-#include "FbTk/Observer.hh"
-#include "FbTk/EventHandler.hh"
-#include "FbTk/XLayerItem.hh"
-
 #include "FbWinFrame.hh"
 #include "Focusable.hh"
 #include "FocusableTheme.hh"
+#include "FocusControl.hh"
 #include "WinButton.hh"
 
-#include <sys/time.h>
+#include "FbTk/DefaultValue.hh"
+#include "FbTk/Timer.hh"
+#include "FbTk/FbTime.hh"
+#include "FbTk/EventHandler.hh"
+#include "FbTk/LayerItem.hh"
+#include "FbTk/Signal.hh"
+
 #include <vector>
 #include <string>
 #include <memory>
@@ -46,19 +46,19 @@
 class WinClient;
 class FbWinFrameTheme;
 class BScreen;
-class FocusControl;
 class FbMenu;
 
 namespace FbTk {
 class TextButton;
 class MenuTheme;
 class ImageControl;
-class XLayer;
+class Layer;
 }
 
 /// Creates the window frame and handles any window event for it
-class FluxboxWindow: public Focusable, public FbTk::Observer,
-        public FbTk::EventHandler {
+class FluxboxWindow: public Focusable,
+                     public FbTk::EventHandler,
+                     private FbTk::SignalTracker {
 public:
     /// Motif wm Hints
     enum {
@@ -89,9 +89,7 @@ public:
 
     /// Different resize modes when resizing a window
     enum ResizeModel {
-        QUADRANTRESIZE,                   ///< resizes from one quadrant
         CENTERRESIZE,                     ///< resizes from center
-        NEARESTEDGERESIZE,                ///< resizes the nearest edge
         TOPLEFTRESIZE,                    ///< resizes top left corner
         TOPRESIZE,                        ///< resizes top edge
         TOPRIGHTRESIZE,                   ///< resizes top right corner
@@ -100,6 +98,7 @@ public:
         BOTTOMLEFTRESIZE,                 ///< resizes bottom left corner
         BOTTOMRESIZE,                     ///< resizes bottom edge
         BOTTOMRIGHTRESIZE,                ///< resizes bottom right corner
+        EDGEORCORNERRESIZE,               ///< resizes nearest edge or corner
         DEFAULTRESIZE = BOTTOMRIGHTRESIZE ///< default resize mode
     };
 
@@ -195,11 +194,11 @@ public:
 
     // ------------------
     // Per window transparency addons
-    unsigned char getFocusedAlpha() const { return frame().getAlpha(true); }
-    unsigned char getUnfocusedAlpha() const { return frame().getAlpha(false); }
-    void setFocusedAlpha(unsigned char alpha) { frame().setAlpha(true, alpha); }
-    void setUnfocusedAlpha(unsigned char alpha) { frame().setAlpha(false, alpha); }
-    void updateAlpha(bool focused, unsigned char alpha)  { frame().setAlpha(focused, alpha); }
+    int getFocusedAlpha() const { return frame().getAlpha(true); }
+    int getUnfocusedAlpha() const { return frame().getAlpha(false); }
+    void setFocusedAlpha(int alpha) { frame().setAlpha(true, alpha); }
+    void setUnfocusedAlpha(int alpha) { frame().setAlpha(false, alpha); }
+    void updateAlpha(bool focused, int alpha)  { frame().setAlpha(focused, alpha); }
 
     bool getUseDefaultAlpha() const { return frame().getUseDefaultAlpha(); }
     void setDefaultAlpha() { frame().setDefaultAlpha(); }
@@ -221,6 +220,10 @@ public:
     void maximizeVertical();
     /// maximizes the window fully
     void maximizeFull();
+
+    /// disables maximization, without restoring the old size
+    void disableMaximization();
+
     /// toggles shade
     void shade();
     /// shades window
@@ -240,8 +243,7 @@ public:
     void raise();
     void lower();
     void tempRaise();
-    void raiseLayer();
-    void lowerLayer();
+    void changeLayer(int diff);
     /// moves the window to a new layer
     void moveToLayer(int layernum, bool force = false);
     int getOnHead() const;
@@ -294,8 +296,6 @@ public:
     // popup menu on last button press position
     void popupMenu();
 
-    void pauseMoving();
-    void resumeMoving();
     /**
        @name event handlers
     */
@@ -315,9 +315,6 @@ public:
     void enterNotifyEvent(XCrossingEvent &ev);
     void leaveNotifyEvent(XCrossingEvent &ev);
     //@}
-
-    /// handle Subject notifications
-    void update(FbTk::Subject *subj);
 
     void applyDecorations();
     void toggleDecoration();
@@ -343,7 +340,7 @@ public:
      */
     void startResizing(int x, int y, ReferenceCorner dir);
     /// determine which edge or corner to resize
-    ReferenceCorner getResizeDirection(int x, int y, ResizeModel model) const;
+    ReferenceCorner getResizeDirection(int x, int y, ResizeModel model, int corner_size_px, int corner_size_pc) const;
     /// stops the resizing
     void stopResizing(bool interrupted = false);
     /// starts tabbing
@@ -352,6 +349,8 @@ public:
     /// determine the reference corner from a string
     static ReferenceCorner getCorner(std::string str);
     /// convert to coordinates on the root window
+    void translateXCoords(int &x, ReferenceCorner dir = LEFTTOP) const;
+    void translateYCoords(int &y, ReferenceCorner dir = LEFTTOP) const;
     void translateCoords(int &x, int &y, ReferenceCorner dir = LEFTTOP) const;
 
     /**
@@ -383,6 +382,7 @@ public:
     bool isClosable() const { return functions.close; }
     bool isMoveable() const { return functions.move; }
     bool isStuck() const { return m_state.stuck; }
+    bool isFocusNew() const { return m_focus_new; }
     bool hasTitlebar() const { return decorations.titlebar; }
     bool isMoving() const { return moving; }
     bool isResizing() const { return resizing; }
@@ -394,10 +394,12 @@ public:
     WinClient &winClient() { return *m_client; }
     const WinClient &winClient() const { return *m_client; }
 
+    WinClient* winClientOfLabelButtonWindow(Window w);
+
     bool isTyping() const;
 
-    const FbTk::XLayerItem &layerItem() const { return m_frame.layerItem(); }
-    FbTk::XLayerItem &layerItem() { return m_frame.layerItem(); }
+    const FbTk::LayerItem &layerItem() const { return m_frame.layerItem(); }
+    FbTk::LayerItem &layerItem() { return m_frame.layerItem(); }
 
     Window clientWindow() const;
 
@@ -411,11 +413,14 @@ public:
     FbTk::FbWindow &parent() { return m_parent; }
 
     bool acceptsFocus() const;
+    bool isModal() const;
     const FbTk::PixmapWithMask &icon() const;
-    const std::string &title() const;
-    const std::string &getWMClassName() const;
-    const std::string &getWMClassClass() const;
+    const FbTk::BiDiString &title() const;
+    const FbTk::FbString &getWMClassName() const;
+    const FbTk::FbString &getWMClassClass() const;
     std::string getWMRole() const;
+    long getCardinalProperty(Atom prop,bool*exists=NULL) const;
+    FbTk::FbString getTextProperty(Atom prop,bool*exists=NULL) const;
     void setWindowType(WindowState::WindowType type);
     bool isTransient() const;
 
@@ -450,36 +455,28 @@ public:
        @name signals
        @{
     */
-    FbTk::Subject &stateSig() { return m_statesig; }
-    const FbTk::Subject &stateSig() const { return m_statesig; }
-    FbTk::Subject &layerSig() { return m_layersig; }
-    const FbTk::Subject &layerSig() const { return m_layersig; }
-    FbTk::Subject &hintSig() { return m_hintsig; }
-    const FbTk::Subject &hintSig() const { return m_hintsig; }
-    FbTk::Subject &workspaceSig() { return m_workspacesig; }
-    const FbTk::Subject &workspaceSig() const { return m_workspacesig; }
+    FbTk::Signal<FluxboxWindow &> &stateSig() { return m_statesig; }
+    FbTk::Signal<FluxboxWindow &> &layerSig() { return m_layersig; }
+    FbTk::Signal<FluxboxWindow &> &hintSig() { return m_hintsig; }
+    FbTk::Signal<FluxboxWindow &> &workspaceSig() { return m_workspacesig; }
     /** @} */ // end group signals
 
     //@}
 
-    class WinSubject: public FbTk::Subject {
-    public:
-        WinSubject(FluxboxWindow &w):m_win(w) { }
-        FluxboxWindow &win() { return m_win; }
-        const FluxboxWindow &win() const { return m_win; }
-    private:
-        FluxboxWindow &m_win;
-    };
-
     bool oplock; ///< Used to help stop transient loops occurring by locking a window during certain operations
 
 private:
+    /// signal callback for title changes by clients
+    void setTitle(const std::string &title, Focusable &client);
+
     void setupWindow();
     void updateButtons();
 
     void init();
     void updateClientLeftWindow();
     void grabButtons();
+
+    void themeReconfigured();
 
     /**
      * Calculates insertition position in the list by
@@ -506,7 +503,7 @@ private:
     // modifies left and top if snap is necessary
     void doSnapping(int &left, int &top);
     // user_w/h return the values that should be shown to the user
-    void fixsize();
+    void fixSize();
     void moveResizeClient(WinClient &client);
     /// sends configurenotify to all clients
     void sendConfigureNotify();
@@ -521,29 +518,32 @@ private:
     static void ungrabPointer(Time time);
 
     void associateClient(WinClient &client);
+    /// Called when focused changed, and is attached when it is not in fullscreen mode
+    void focusedWindowChanged(BScreen &screen, FluxboxWindow *focused_win, WinClient* client);
+    /// Called when workspace area on screen changed.
+    void workspaceAreaChanged(BScreen &screen);
+    void frameExtentChanged();
+
 
     // state and hint signals
-    WinSubject m_hintsig,
-        m_statesig,
-        m_layersig,
-        m_workspacesig;
+    FbTk::Signal<FluxboxWindow &> m_workspacesig, m_statesig, m_layersig, m_hintsig;
 
-    time_t m_creation_time;
+    uint64_t m_creation_time;
+    uint64_t m_last_keypress_time;
+    FbTk::Timer m_timer;
 
     // Window states
     bool moving, resizing, m_initialized;
 
     WinClient *m_attaching_tab;
 
-    FbTk::Timer m_timer;
     Display *display; /// display connection
 
     int m_button_grab_x, m_button_grab_y; // handles last button press event for move
     int m_last_resize_x, m_last_resize_y; // handles last button press event for resize
     int m_last_move_x, m_last_move_y; // handles last pos for non opaque moving
-    unsigned int m_last_resize_h, m_last_resize_w; // handles height/width for resize "window"
-
-    timeval m_last_keypress_time;
+    int m_last_resize_h, m_last_resize_w; // handles height/width for resize "window"
+    int m_last_pressed_button;
 
     unsigned int m_workspace_number;
     unsigned long m_current_state; // NormalState | IconicState | Withdrawn
@@ -556,16 +556,16 @@ private:
     Client2ButtonMap m_labelbuttons;
 
     SizeHints m_size_hint;
-    struct _decorations {
-        bool titlebar, handle, border, iconify,
-            maximize, close, menu, sticky, shade, tab, enabled;
+    struct {
+        bool titlebar:1, handle:1, border:1, iconify:1,
+            maximize:1, close:1, menu:1, sticky:1, shade:1, tab:1, enabled:1;
     } decorations;
 
     std::vector<WinButton::Type> m_titlebar_buttons[2];
     bool m_toggled_decos;
 
-    struct _functions {
-        bool resize, move, iconify, maximize, close, tabable;
+    struct {
+        bool resize:1, move:1, iconify:1, maximize:1, close:1, tabable:1;
     } functions;
 
     typedef FbTk::ConstObjectAccessor<bool, FocusControl> BoolAcc;

@@ -27,6 +27,7 @@
 #include "FileUtil.hh"
 #include "I18n.hh"
 #include "Image.hh"
+#include "STLUtil.hh"
 
 #ifdef HAVE_CSTDIO
   #include <cstdio>
@@ -50,14 +51,12 @@ struct LoadThemeHelper {
     }
     void operator ()(ThemeManager::ThemeList &tmlist) {
 
-        for_each(tmlist.begin(), tmlist.end(),
-                 *this);
+        STLUtil::forAll(tmlist, *this);
         // send reconfiguration signal to theme and listeners
         ThemeManager::ThemeList::iterator it = tmlist.begin();
         ThemeManager::ThemeList::iterator it_end = tmlist.end();
         for (; it != it_end; ++it) {
-            (*it)->reconfigTheme();
-            (*it)->reconfigSig().notify();
+            (*it)->reconfigSig().emit();
         }
     }
 
@@ -116,12 +115,13 @@ bool ThemeManager::unregisterTheme(Theme &tm) {
 
 bool ThemeManager::load(const string &filename,
                         const string &overlay_filename, int screen_num) {
+    
     string location = FbTk::StringUtil::expandFilename(filename);
     StringUtil::removeTrailingWhitespace(location);
     StringUtil::removeFirstWhitespace(location);
     string prefix = "";
 
-    if (FileUtil::isDirectory(filename.c_str())) {
+    if (FileUtil::isDirectory(location.c_str())) {
         prefix = location;
 
         location.append("/theme.cfg");
@@ -174,9 +174,7 @@ bool ThemeManager::load(const string &filename,
     // get list and go throu all the resources and load them
     // and then reconfigure them
     if (screen_num < 0 || screen_num > m_max_screens) {
-        for_each(m_themes.begin(),
-                 m_themes.end(),
-                 load_theme_helper);
+        STLUtil::forAll(m_themes, load_theme_helper);
     } else {
         load_theme_helper(m_themes[screen_num]);
     }

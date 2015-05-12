@@ -27,8 +27,8 @@
 
 #include "FbTk/CachedPixmap.hh"
 #include "FbTk/FbPixmap.hh"
-#include "FbTk/Observer.hh"
 #include "FbTk/TextButton.hh"
+#include "FbTk/Signal.hh"
 
 class IconbarTheme;
 
@@ -36,7 +36,7 @@ namespace FbTk {
 template <class T> class ThemeProxy;
 }
 
-class IconButton: public FbTk::TextButton, public FbTk::Observer {
+class IconButton: public FbTk::TextButton {
 public:
     IconButton(const FbTk::FbWindow &parent,
                FbTk::ThemeProxy<IconbarTheme> &focused_theme,
@@ -57,7 +57,6 @@ public:
 
     void reconfigTheme();
 
-    void update(FbTk::Subject *subj);
     void setPixmap(bool use);
 
     Focusable &win() { return m_win; }
@@ -68,8 +67,15 @@ public:
 protected:
     void drawText(int x, int y, FbTk::FbDrawable *drawable_override);
 private:
+    void reconfigAndClear();
     void setupWindow();
     void showTooltip();
+
+    /// Refresh all pixmaps and windows
+    /// @param setup Wether to setup window again.
+    void refreshEverything(bool setup);
+    /// Called when client title changed.
+    void clientTitleChanged();
 
     Focusable &m_win;
     FbTk::FbWindow m_icon_window;
@@ -82,6 +88,7 @@ private:
     FocusableTheme<IconbarTheme> m_theme;
     // cached pixmaps
     FbTk::CachedPixmap m_pm;
+    FbTk::SignalTracker m_signals;
 };
 
 #endif // ICONBUTTON_HH

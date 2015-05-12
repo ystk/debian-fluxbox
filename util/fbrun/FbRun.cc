@@ -21,11 +21,11 @@
 
 #include "FbRun.hh"
 
-#include "App.hh"
-#include "EventManager.hh"
-#include "Color.hh"
-#include "KeyUtil.hh"
-#include "FileUtil.hh"
+#include "FbTk/App.hh"
+#include "FbTk/EventManager.hh"
+#include "FbTk/Color.hh"
+#include "FbTk/KeyUtil.hh"
+#include "FbTk/FileUtil.hh"
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -47,6 +47,10 @@
 #include <fstream>
 #include <algorithm>
 
+#ifdef _WIN32
+#include <cstring>
+#endif
+
 using std::cerr;
 using std::endl;
 using std::string;
@@ -58,6 +62,7 @@ using std::ios;
 FbRun::FbRun(int x, int y, size_t width):
     FbTk::TextBox(DefaultScreen(FbTk::App::instance()->display()),
                   m_font, ""),
+    m_print(false),
     m_font("fixed"),
     m_display(FbTk::App::instance()->display()),
     m_bevel(4),
@@ -74,14 +79,11 @@ FbRun::FbRun(int x, int y, size_t width):
     resize(width, font().height() + m_bevel);
 
     // setup class name
-    XClassHint *class_hint = XAllocClassHint();
-    if (class_hint == 0)
-        throw string("Out of memory");
-    class_hint->res_name = const_cast<char *>("fbrun");
-    class_hint->res_class = const_cast<char *>("FbRun");
-    XSetClassHint(m_display, window(), class_hint);
+    XClassHint ch;
+    ch.res_name = const_cast<char *>("fbrun");
+    ch.res_class = const_cast<char *>("FbRun");
+    XSetClassHint(m_display, window(), &ch);
 
-    XFree(class_hint);
 #ifdef HAVE_XPM
     Pixmap mask = 0;
     Pixmap pm;
@@ -115,6 +117,13 @@ void FbRun::run(const std::string &command) {
     FbTk::App::instance()->end(); // end application
     m_end = true; // mark end of processing
 
+    if (m_print) {
+        std::cout << command;
+        hide();
+        return;
+    }
+
+#ifdef HAVE_FORK
     // fork and execute program
     if (!fork()) {
 
@@ -126,6 +135,26 @@ void FbRun::run(const std::string &command) {
         execl(shell, shell, "-c", command.c_str(), static_cast<void*>(NULL));
         exit(0); //exit child
     }
+#elif defined(_WIN32)
+	/// @todo - unduplicate from FbCommands.cc
+#ifndef PATH_MAX
+#define PATH_MAX 1024
+#endif
+    char comspec[PATH_MAX] = {0};
+    char * env_var = getenv("COMSPEC");
+    if (env_var != NULL) {
+        strncpy(comspec, env_var, PATH_MAX - 1);
+        comspec[PATH_MAX - 1] = '\0';
+    } else {
+        strncpy(comspec, "cmd.exe", 7);
+        comspec[7] = '\0';
+    }
+
+    spawnlp(P_NOWAIT, comspec, comspec, "/c", command.c_str(), static_cast<void*>(NULL));
+
+#else
+#error "Can't build FbRun - don't know how to launch without fork on your platform"
+#endif
 
     hide(); // hide gui
 
@@ -314,7 +343,7 @@ void FbRun::lockPosition(bool size_too) {
 }
 
 void FbRun::prevHistoryItem() {
-    if (m_history.size() == 0 || m_current_history_item == 0) {
+    if (m_history.empty() || m_current_history_item == 0) {
         XBell(m_display, 0);
     } else {
         m_current_history_item--;
@@ -327,30 +356,32 @@ void FbRun::nextHistoryItem() {
         XBell(m_display, 0);
     } else {
         m_current_history_item++;
+        FbTk::BiDiString text("");
         if (m_current_history_item == m_history.size()) {
             m_current_history_item = m_history.size();
-            setText("");
-         } else
-            setText(m_history[m_current_history_item]);
+        } else
+            text.setLogical((m_history[m_current_history_item]));
+
+        setText(text);
     }
 }
 
 void FbRun::firstHistoryItem() {
-    if (m_history.size() == 0 || m_current_history_item == 0) {
+    if (m_history.empty() || m_current_history_item == 0) {
         XBell(m_display, 0);
     } else {
         m_current_history_item = 0;
-        setText(m_history[m_current_history_item]);
+        setText(FbTk::BiDiString(m_history[m_current_history_item]));
     }
 }
 
 void FbRun::lastHistoryItem() {
     // actually one past the end
-    if (m_history.size() == 0) {
+    if (m_history.empty()) {
         XBell(m_display, 0);
     } else {
         m_current_history_item = m_history.size();
-        setText("");
+        setText(FbTk::BiDiString(""));
     }
 }
 
@@ -366,7 +397,7 @@ void FbRun::tabCompleteHistory() {
         while (history_item != m_current_history_item && nr++ < m_history.size()) {
             if (m_history[history_item].find(m_last_completion_prefix) == 0) {
                 m_current_history_item = history_item;
-                setText(m_history[m_current_history_item]);
+                setText(FbTk::BiDiString(m_history[m_current_history_item]));
                 cursorEnd();
                 break;
             }

@@ -23,8 +23,8 @@
 #define WINBUTTON_HH
 
 #include "FbTk/Button.hh"
-#include "FbTk/Observer.hh"
 #include "FbTk/FbPixmap.hh"
+#include "FbTk/Signal.hh"
 
 class FluxboxWindow;
 class WinButtonTheme;
@@ -35,10 +35,20 @@ template <class T> class ThemeProxy;
 }
 
 /// draws and handles basic window button graphic
-class WinButton:public FbTk::Button, public FbTk::Observer {
+class WinButton:public FbTk::Button, public FbTk::SignalTracker {
 public:
     /// draw type for the button
-    enum Type {MAXIMIZE, MINIMIZE, SHADE, STICK, CLOSE, MENUICON};
+    enum Type {
+        MAXIMIZE,
+        MINIMIZE,
+        SHADE,
+        STICK,
+        CLOSE,
+        MENUICON,
+        LEFT_HALF,
+        RIGHT_HALF
+    };
+
     WinButton(FluxboxWindow &listen_to, 
               FbTk::ThemeProxy<WinButtonTheme> &theme,
               FbTk::ThemeProxy<WinButtonTheme> &pressed,
@@ -52,20 +62,21 @@ public:
     void setBackgroundColor(const FbTk::Color &color);
     void setPressedColor(const FbTk::Color &color);
 
-    Pixmap getBackgroundPixmap() const;
-    Pixmap getPressedPixmap() const;
+    Pixmap getBackgroundPixmap() const { return getPixmap(m_theme); }
+    Pixmap getPressedPixmap() const { return getPixmap(m_pressed_theme); }
     /// override for redrawing
     void clear();
-    void update(FbTk::Subject *subj);
+    void updateAll();
 private:
     void drawType();
+    Pixmap getPixmap(const FbTk::ThemeProxy<WinButtonTheme> &) const;
     Type m_type; ///< the button type
     FluxboxWindow &m_listen_to;
     FbTk::ThemeProxy<WinButtonTheme> &m_theme, &m_pressed_theme;
 
     FbTk::FbPixmap m_icon_pixmap;
     FbTk::FbPixmap m_icon_mask;
-    
+
     bool overrode_bg, overrode_pressed;
 };
 

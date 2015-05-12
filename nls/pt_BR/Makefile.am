@@ -1,7 +1,7 @@
 # nls/pt_BR/Makefile.am for Fluxbox - www.fluxbox.org
 
 THE_LANG = pt_BR
-SRC_CODESET = ISO-8859-1
+SRC_CODESET = UTF-8
 DEST_CODESETS = ISO-8859-1 UTF-8
 
 LOCALE_PATH = @LOCALE_PATH@
@@ -29,7 +29,7 @@ install-data-local: $(CATFILES)
 translations: $(GENERATED_MFILES)
 
 generated-%.m: Translation.m
-	iconv -f $(SRC_CODESET) -t $* Translation.m | sed s/$(SRC_CODESET)/$*/ > $@
+	iconv -f $(SRC_CODESET) -t $* $(srcdir)/Translation.m | sed s/$(SRC_CODESET)/$*/ > $@
 
 uninstall-local:
 	@if test x$(NLSTEST) = "x-DNLS"; then \
@@ -42,5 +42,5 @@ uninstall-local:
 fluxbox-%.cat: generated-%.m Translation.m
 	@if test x$(NLSTEST) = "x-DNLS"; then \
 		echo "Creating catfile for $*"; \
-		$(gencat_cmd) fluxbox-$*.cat generated-$*.m; \
+		$(gencat_cmd) fluxbox-$*.cat $(srcdir)/generated-$*.m; \
 	fi

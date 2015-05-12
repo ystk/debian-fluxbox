@@ -25,9 +25,7 @@
 
 #include "FbMenu.hh"
 
-namespace FbTk {
-class Observer;
-}
+#include "FbTk/Signal.hh"
 
 class BScreen;
 
@@ -35,7 +33,7 @@ class BScreen;
  * Creates the "send to menu".
  * Displays all the workspaces for which the current window can be sent to.
  */
-class SendToMenu:public FbMenu {
+class SendToMenu:public FbMenu, private FbTk::SignalTracker {
 public:
     /// @param screen the screen on which this menu should be created on.
     explicit SendToMenu(BScreen &screen);
@@ -43,10 +41,13 @@ public:
     /// @see FbTk::Menu
     void show();
 private:
+    /// workspace count changed on screen
+    void rebuildMenuForScreen( BScreen& screen ) {
+        rebuildMenu();
+    }
+
     /// Rebuild the menu from scratch.
     void rebuildMenu();
-    /// listens to signals that makes this instance need to rebuild menu
-    FbTk::Observer *m_rebuildObs;
 };
 
 #endif // SENDTOMENU_HH

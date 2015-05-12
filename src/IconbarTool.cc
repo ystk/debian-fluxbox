@@ -35,6 +35,7 @@
 #include "FocusControl.hh"
 #include "FbCommands.hh"
 #include "Layer.hh"
+#include "Debug.hh"
 
 #include "FbTk/STLUtil.hh"
 #include "FbTk/I18n.hh"
@@ -46,6 +47,10 @@
 #include "FbTk/ImageControl.hh"
 #include "FbTk/MacroCommand.hh"
 #include "FbTk/MenuSeparator.hh"
+#include "FbTk/Util.hh"
+#include "FbTk/STLUtil.hh"
+#include "FbTk/Select2nd.hh"
+#include "FbTk/Compose.hh"
 
 #include <typeinfo>
 #include <iterator>
@@ -57,11 +62,7 @@
 
 using std::string;
 using std::list;
-
-#ifdef DEBUG
-using std::cerr;
 using std::endl;
-#endif // DEBUG
 
 namespace FbTk {
 
@@ -211,10 +212,8 @@ public:
     explicit ShowMenu(FluxboxWindow &win):m_win(win) { }
     void execute() {
         // get last button pos
-        const XEvent &event = Fluxbox::instance()->lastEvent();
-        int x = event.xbutton.x_root - (m_win.menu().width() / 2);
-        int y = event.xbutton.y_root - (m_win.menu().height() / 2);
-        m_win.popupMenu(x, y);
+        const XEvent &e = Fluxbox::instance()->lastEvent();
+        m_win.popupMenu(e.xbutton.x_root, e.xbutton.y_root);
     }
 private:
     FluxboxWindow &m_win;
@@ -241,7 +240,7 @@ private:
     Focusable &m_win;
 };
 
-}; // end anonymous namespace
+} // end anonymous namespace
 
 IconbarTool::IconbarTool(const FbTk::FbWindow &parent, IconbarTheme &theme,
                          FbTk::ThemeProxy<IconbarTheme> &focused_theme,
@@ -249,7 +248,7 @@ IconbarTool::IconbarTool(const FbTk::FbWindow &parent, IconbarTheme &theme,
                          BScreen &screen, FbTk::Menu &menu):
     ToolbarItem(ToolbarItem::RELATIVE),
     m_screen(screen),
-    m_icon_container(parent),
+    m_icon_container(parent, false),
     m_theme(theme),
     m_focused_theme(focused_theme),
     m_unfocused_theme(unfocused_theme),
@@ -260,14 +259,15 @@ IconbarTool::IconbarTool(const FbTk::FbWindow &parent, IconbarTheme &theme,
               screen.name() + ".iconbar.mode", screen.altName() + ".Iconbar.Mode"),
     m_rc_alignment(screen.resourceManager(), FbTk::Container::RELATIVE,
                    screen.name() + ".iconbar.alignment", screen.altName() + ".Iconbar.Alignment"),
-    m_rc_client_width(screen.resourceManager(), 70,
+    m_rc_client_width(screen.resourceManager(), 128,
                    screen.name() + ".iconbar.iconWidth", screen.altName() + ".Iconbar.IconWidth"),
     m_rc_client_padding(screen.resourceManager(), 10,
                    screen.name() + ".iconbar.iconTextPadding", screen.altName() + ".Iconbar.IconTextPadding"),
     m_rc_use_pixmap(screen.resourceManager(), true,
                     screen.name() + ".iconbar.usePixmap", screen.altName() + ".Iconbar.UsePixmap"),
     m_menu(screen.menuTheme(), screen.imageControl(),
-           *screen.layerManager().getLayer(Layer::MENU)) {
+           *screen.layerManager().getLayer(ResourceLayer::MENU)),
+    m_alpha(255) {
 
     // setup mode menu
     setupModeMenu(m_menu, *this);
@@ -288,13 +288,15 @@ IconbarTool::IconbarTool(const FbTk::FbWindow &parent, IconbarTheme &theme,
     m_menu.setInternalMenu();
 
     // add iconbar menu to toolbar menu
-    menu.insert(m_menu.label(), &m_menu);
+    menu.insert(m_menu.label().logical(), &m_menu);
 
     // setup signals
-    theme.reconfigSig().attach(this);
-    focused_theme.reconfigSig().attach(this);
-    unfocused_theme.reconfigSig().attach(this);
-    setMode(*m_rc_mode);
+    m_tracker.join(theme.reconfigSig(), FbTk::MemFun(*this, &IconbarTool::themeReconfigured));
+    m_tracker.join(focused_theme.reconfigSig(),
+            FbTk::MemFun(*this, &IconbarTool::themeReconfigured));
+    m_tracker.join(unfocused_theme.reconfigSig(),
+            FbTk::MemFun(*this, &IconbarTool::themeReconfigured));
+    themeReconfigured();
 }
 
 IconbarTool::~IconbarTool() {
@@ -307,6 +309,7 @@ void IconbarTool::move(int x, int y) {
 
 void IconbarTool::resize(unsigned int width, unsigned int height) {
     m_icon_container.resize(width, height);
+    m_icon_container.setMaxTotalSize(m_icon_container.orientation() == FbTk::ROT0 || m_icon_container.orientation() == FbTk::ROT180 ? width : height);
     renderTheme();
 }
 
@@ -314,6 +317,7 @@ void IconbarTool::moveResize(int x, int y,
                              unsigned int width, unsigned int height) {
 
     m_icon_container.moveResize(x, y, width, height);
+    m_icon_container.setMaxTotalSize(m_icon_container.orientation() == FbTk::ROT0 || m_icon_container.orientation() == FbTk::ROT180 ? width : height);
     renderTheme();
 }
 
@@ -327,7 +331,7 @@ void IconbarTool::hide() {
 
 void IconbarTool::setAlignment(FbTk::Container::Alignment align) {
     *m_rc_alignment = align;
-    update(0);
+    update(ALIGN, NULL);
     m_menu.reconfigure();
 }
 
@@ -340,22 +344,24 @@ void IconbarTool::setMode(string mode) {
     // lock graphics update
     m_icon_container.setUpdateLock(true);
 
-    if (m_winlist.get()) {
-        m_winlist->addSig().detach(this);
-        m_winlist->removeSig().detach(this);
-        m_winlist->orderSig().detach(this);
-        m_winlist->resetSig().detach(this);
-    }
     if (mode == "none")
         m_winlist.reset(new FocusableList(m_screen));
     else
         m_winlist.reset(new FocusableList(m_screen,
                                            mode + " (iconhidden=no)"));
     if (m_winlist.get()) {
-        m_winlist->addSig().attach(this);
-        m_winlist->removeSig().attach(this);
-        m_winlist->orderSig().attach(this);
-        m_winlist->resetSig().attach(this);
+        m_winlist->addSig().connect(
+                    std::bind1st(FbTk::MemFun(*this, &IconbarTool::update), LIST_ADD)
+                );
+        m_winlist->removeSig().connect(
+                    std::bind1st(FbTk::MemFun(*this, &IconbarTool::update), LIST_REMOVE)
+                );
+        m_winlist->addSig().connect(
+                    std::bind1st(FbTk::MemFun(*this, &IconbarTool::update), LIST_ORDER)
+                );
+        m_winlist->resetSig().connect(FbTk::MemFunBind(
+                        *this, &IconbarTool::update, LIST_RESET, static_cast<Focusable *>(0)
+                    ));
     }
     reset();
 
@@ -381,7 +387,11 @@ unsigned int IconbarTool::borderWidth() const {
     return m_icon_container.borderWidth();
 }
 
-void IconbarTool::update(FbTk::Subject *subj) {
+void IconbarTool::themeReconfigured() {
+    setMode(*m_rc_mode);
+}
+
+void IconbarTool::update(UpdateReason reason, Focusable *win) {
     // ignore updates if we're shutting down
     if (m_screen.isShuttingdown()) {
         if (!m_icons.empty())
@@ -390,35 +400,25 @@ void IconbarTool::update(FbTk::Subject *subj) {
     }
 
     m_icon_container.setAlignment(*m_rc_alignment);
-    // clamp to normal values
-    if (*m_rc_client_width < 1)
-        *m_rc_client_width = 10;
-    else if (*m_rc_client_width > 400)
-        *m_rc_client_width = 400;
 
+    *m_rc_client_width = FbTk::Util::clamp(*m_rc_client_width, 10, 400);
     m_icon_container.setMaxSizePerClient(*m_rc_client_width);
-
-    if (subj == &m_focused_theme.reconfigSig() ||
-        subj == &m_unfocused_theme.reconfigSig() ||
-        subj == &m_theme.reconfigSig()) {
-        setMode(*m_rc_mode);
-        return;
-    }
 
     // lock graphic update
     m_icon_container.setUpdateLock(true);
 
-    if (subj && typeid(*subj) == typeid(FocusableList::FocusableListSubject)) {
-        FocusableList::FocusableListSubject *fsubj =
-            static_cast<FocusableList::FocusableListSubject *>(subj);
-        if (subj == &m_winlist->addSig())
-            insertWindow(*fsubj->win());
-        else if (subj == &m_winlist->removeSig())
-            removeWindow(*fsubj->win());
-        else if (subj == &m_winlist->resetSig())
+    switch(reason) {
+        case LIST_ADD: case LIST_ORDER:
+            insertWindow(*win);
+            break;
+        case LIST_REMOVE:
+            removeWindow(*win);
+            break;
+        case LIST_RESET:
             reset();
-        else if (subj == &m_winlist->orderSig())
-            insertWindow(*fsubj->win());
+            break;
+        case ALIGN:
+            break;
     }
 
     // unlock container and update graphics
@@ -469,14 +469,13 @@ void IconbarTool::updateSizing() {
     m_icon_container.setBorderWidth(m_theme.border().width());
     m_icon_container.setBorderColor(m_theme.border().color());
 
-    IconMap::iterator icon_it = m_icons.begin();
-    const IconMap::iterator icon_it_end = m_icons.end();
-    for (; icon_it != icon_it_end; ++icon_it)
-        icon_it->second->reconfigTheme();
+    FbTk::STLUtil::forAll(m_icons, 
+            FbTk::Compose(std::mem_fun(&IconButton::reconfigTheme), 
+                FbTk::Select2nd<IconMap::value_type>()));
 
 }
 
-void IconbarTool::renderTheme(unsigned char alpha) {
+void IconbarTool::renderTheme(int alpha) {
 
     m_alpha = alpha;
     renderTheme();
@@ -528,9 +527,8 @@ void IconbarTool::removeWindow(Focusable &win) {
     IconMap::iterator it = m_icons.find(&win);
     if (it == m_icons.end())
         return;
-#ifdef DEBUG
-    cerr<<"IconbarTool::"<<__FUNCTION__<<"( 0x"<<&win<<" title = "<<win.title()<<") found!"<<endl;
-#endif // DEBUG
+
+    fbdbg<<"IconbarTool::"<<__FUNCTION__<<"( 0x"<<&win<<" title = "<<win.title().logical()<<") found!"<<endl;
 
     // remove from list and render theme again
     IconButton *button = it->second;
@@ -544,9 +542,9 @@ IconButton *IconbarTool::makeButton(Focusable &win) {
     FluxboxWindow *fbwin = win.fbwindow();
     if (!fbwin || fbwin->clientList().empty())
         return 0;
-#ifdef DEBUG
-    cerr<<"IconbarTool::addWindow(0x"<<&win<<" title = "<<win.title()<<")"<<endl;
-#endif // DEBUG
+
+    fbdbg<<"IconbarTool::addWindow(0x"<<&win<<" title = "<<win.title().logical()<<")"<<endl;
+
     IconButton *button = new IconButton(m_icon_container, m_focused_theme,
                                         m_unfocused_theme, win);
 
@@ -575,3 +573,4 @@ void IconbarTool::setOrientation(FbTk::Orientation orient) {
     m_icon_container.setOrientation(orient);
     ToolbarItem::setOrientation(orient);
 }
+

@@ -36,7 +36,7 @@ SignalHandler &SignalHandler::instance() {
     return singleton;
 }
 
-bool SignalHandler::registerHandler(int signum, SignalEventHandler *eh, 
+bool SignalHandler::registerHandler(int signum, SignalEventHandler *eh,
                                     SignalEventHandler **oldhandler_ret) {
     // must be less than NSIG
     if (signum >= NSIG)
@@ -45,18 +45,24 @@ bool SignalHandler::registerHandler(int signum, SignalEventHandler *eh,
     // get old signal handler for this signum
     if (oldhandler_ret != 0)
         *oldhandler_ret = s_signal_handler[signum];
-	
+
+#ifdef HAVE_SIGACTION
     struct sigaction sa;
     // set callback
     sa.sa_handler = SignalHandler::handleSignal;
     sigemptyset (&sa.sa_mask);
     sa.sa_flags = 0;
-	
+
     if (sigaction(signum, &sa, 0) == -1)
         return false;
-	
+#else
+    // Fallback code for Windows and other platforms lacking sigaction.
+    if (signal(signum, &SignalHandler::handleSignal) == SIG_ERR) {
+        return false;
+    }
+#endif
     s_signal_handler[signum] = eh;
-	
+
     return true;
 }
 
@@ -69,4 +75,5 @@ void SignalHandler::handleSignal(int signum) {
     }
 }
 
-}; 
+}
+

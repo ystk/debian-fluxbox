@@ -22,20 +22,18 @@
 #ifndef FBWINFRAME_HH
 #define FBWINFRAME_HH
 
+#include "WindowState.hh"
+
 #include "FbTk/FbWindow.hh"
 #include "FbTk/EventHandler.hh"
 #include "FbTk/RefCount.hh"
-#include "FbTk/Subject.hh"
 #include "FbTk/Color.hh"
-#include "FbTk/XLayerItem.hh"
+#include "FbTk/LayerItem.hh"
 #include "FbTk/TextButton.hh"
 #include "FbTk/DefaultValue.hh"
 #include "FbTk/Container.hh"
 #include "FbTk/Shape.hh"
-
-#include "WindowState.hh"
-
-#include <X11/Xutil.h>
+#include "FbTk/Signal.hh"
 
 #include <vector>
 #include <memory>
@@ -50,7 +48,6 @@ namespace FbTk {
 class ImageControl;
 template <class T> class Command;
 class Texture;
-class XLayer;
 }
 
 /// holds a window frame with a client window
@@ -67,11 +64,13 @@ public:
         BOTTOMLEFT, BOTTOM, BOTTOMRIGHT,
         // left and right placement
         LEFTBOTTOM, LEFT, LEFTTOP,
-        RIGHTBOTTOM, RIGHT, RIGHTTOP
+        RIGHTBOTTOM, RIGHT, RIGHTTOP,
+
+        DEFAULT = TOPLEFT
     };
 
     /// create a top level window
-    FbWinFrame(BScreen &screen, WindowState &state,
+    FbWinFrame(BScreen &screen, unsigned int client_depth, WindowState &state,
                FocusableTheme<FbWinFrameTheme> &theme);
 
 /*    /// create a frame window inside another FbWindow, NOT IMPLEMENTED!
@@ -114,14 +113,14 @@ public:
     /// set focus/unfocus style
     void setFocus(bool newvalue);
 
-    void setFocusTitle(const std::string &str) { m_label.setText(str); }
+    void setFocusTitle(const FbTk::BiDiString &str) { m_label.setText(str); }
     bool setTabMode(TabMode tabmode);
     void updateTabProperties() { alignTabs(); }
 
     /// Alpha settings
-    void setAlpha(bool focused, unsigned char value);
+    void setAlpha(bool focused, int value);
     void applyAlpha();
-    unsigned char getAlpha(bool focused) const;
+    int getAlpha(bool focused) const;
 
     void setDefaultAlpha();
     bool getUseDefaultAlpha() const;
@@ -146,8 +145,6 @@ public:
     void moveLabelButtonLeftOf(FbTk::TextButton &btn, const FbTk::TextButton &dest);
     //move the first label button to the right of the second
     void moveLabelButtonRightOf(FbTk::TextButton &btn, const FbTk::TextButton &dest);
-    /// which button is to be rendered focused
-    void setLabelButtonFocus(IconButton &btn);
     /// attach a client window for client area
     void setClientWindow(FbTk::FbWindow &win);
     /// remove attached client window
@@ -231,14 +228,17 @@ public:
     unsigned int buttonHeight() const;
     bool externalTabMode() const { return m_tabmode == EXTERNAL && m_use_tabs; }
 
-    const FbTk::XLayerItem &layerItem() const { return m_layeritem; }
-    FbTk::XLayerItem &layerItem() { return m_layeritem; }
+    const FbTk::LayerItem &layerItem() const { return m_layeritem; }
+    FbTk::LayerItem &layerItem() { return m_layeritem; }
 
-    const FbTk::Subject &frameExtentSig() const { return m_frame_extent_sig; }
-    FbTk::Subject &frameExtentSig() { return m_frame_extent_sig; }
+    FbTk::Signal<> &frameExtentSig() { return m_frame_extent_sig; }
     /// @returns true if the window is inside titlebar, 
     /// assuming window is an event window that was generated for this frame.
     bool insideTitlebar(Window win) const;
+
+    /// @returns context for window,
+    /// assuming window is an event window that was generated for this frame.
+    int getContext(Window win, int x=0, int y=0, int last_x=0, int last_y=0, bool doBorders=false);
 
     //@}
 
@@ -310,7 +310,7 @@ private:
     //@{
     FbTk::FbWindow m_window; ///< base window that holds each decorations (ie titlebar, handles)
     // want this deleted before the windows in it
-    FbTk::XLayerItem m_layeritem;
+    FbTk::LayerItem m_layeritem;
 
     FbTk::FbWindow m_titlebar; ///<  titlebar window
     FbTk::Container m_tab_container; ///< Holds tabs
@@ -321,7 +321,7 @@ private:
     FbTk::FbWindow m_clientarea; ///< window that sits behind client window to fill gaps @see setClientWindow
     //@}
 
-    FbTk::Subject m_frame_extent_sig;
+    FbTk::Signal<> m_frame_extent_sig;
 
     typedef std::vector<FbTk::Button *> ButtonList;
     ButtonList m_buttons_left, ///< buttons to the left
@@ -377,9 +377,9 @@ private:
     bool m_need_render;
     int m_button_size; ///< size for all titlebar buttons
     /// alpha values
-    typedef FbTk::ConstObjectAccessor<unsigned char, FbWinFrameTheme> AlphaAcc;
-    FbTk::DefaultValue<unsigned char, AlphaAcc> m_focused_alpha;
-    FbTk::DefaultValue<unsigned char, AlphaAcc> m_unfocused_alpha;
+    typedef FbTk::ConstObjectAccessor<int, FbWinFrameTheme> AlphaAcc;
+    FbTk::DefaultValue<int, AlphaAcc> m_focused_alpha;
+    FbTk::DefaultValue<int, AlphaAcc> m_unfocused_alpha;
 
     FbTk::Shape m_shape;
 };

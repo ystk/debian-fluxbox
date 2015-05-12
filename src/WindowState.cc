@@ -23,7 +23,17 @@
 
 #include "FbTk/StringUtil.hh"
 
-#include <stdlib.h>
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif // HAVE_CONFIG_H
+
+#ifdef HAVE_CSTDLIB
+  #include <cstdlib>
+#else
+  #include <stdlib.h>
+#endif
+
+#include <errno.h>
 
 bool WindowState::useBorder() const {
     return !fullscreen && maximized != MAX_FULL && deco_mask & DECORM_BORDER;
@@ -92,10 +102,10 @@ int WindowState::getDecoMaskFromString(const std::string &str_label) {
         return DECOR_BORDER;
     if (label == "tab")
         return DECOR_TAB;
+
     int mask = -1;
-    if ((str_label.size() > 1 && str_label[0] == '0' && str_label[1] == 'x') ||
-        (str_label.size() > 0 && isdigit(str_label[0])))
-        mask = strtol(str_label.c_str(), NULL, 0);
+    FbTk::StringUtil::extractNumber(str_label, mask);
+
     return mask;
 }
 
@@ -160,6 +170,8 @@ void SizeHints::reset(const XSizeHints &sizehint) {
         min_height = base_height;
 }
 
+namespace {
+
 void closestPointToAspect(unsigned int &ret_x, unsigned int &ret_y,
                           unsigned int point_x, unsigned int point_y,
                           unsigned int aspect_x, unsigned int aspect_y) {
@@ -177,7 +189,9 @@ unsigned int increaseToMultiple(unsigned int val, unsigned int inc) {
 unsigned int decreaseToMultiple(unsigned int val, unsigned int inc) {
     return val % inc ? val - (val % inc) : val;
 }
-    
+
+} // end of anonymous namespace
+
 /**
  * Changes width and height to the nearest (lower) value
  * that conforms to it's size hints.
@@ -236,10 +250,8 @@ void SizeHints::apply(unsigned int &width, unsigned int &height,
             w = increaseToMultiple(h * min_aspect_x / min_aspect_y, width_inc);
     }
 
-    unsigned int max_w = make_fit && (width < max_width || max_width == 0) ?
-                         width : max_width;
-    unsigned int max_h = make_fit && (height < max_height || max_height == 0) ?
-                         height : max_height;
+    unsigned int max_w = (make_fit && (width < max_width || max_width == 0)) ?  width : max_width;
+    unsigned int max_h = (make_fit && (height < max_height || max_height == 0)) ?  height : max_height;
 
     // Check maximum size
     if (max_w > 0 && w + base_width > max_w)
